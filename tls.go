@@ -15,7 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
 	utls "github.com/refraction-networking/utls"
-	"golang.org/x/net/http2"
+	http2 "github.com/kulikov0/headlessclient/internal/chromehttp2"
 )
 
 var (

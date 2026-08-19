@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pion/dtls/v3/pkg/crypto/elliptic"
-	"github.com/pion/dtls/v3/pkg/protocol"
-	"github.com/pion/dtls/v3/pkg/protocol/extension"
-	"github.com/pion/dtls/v3/pkg/protocol/extension/dtls12"
-	"github.com/pion/dtls/v3/pkg/protocol/extension/dtls13"
-	"github.com/pion/dtls/v3/pkg/protocol/handshake"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension/dtls12"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension/dtls13"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
 )
 
 func pionDefaultClientHello(randomByte byte) handshake.MessageClientHello {

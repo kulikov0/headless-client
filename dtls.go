@@ -4,10 +4,10 @@ import (
 	"encoding/binary"
 	"math/rand"
 
-	"github.com/pion/dtls/v3/pkg/protocol/extension"
-	"github.com/pion/dtls/v3/pkg/protocol/extension/dtls13"
-	"github.com/pion/dtls/v3/pkg/protocol/handshake"
-	"github.com/pion/webrtc/v4"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension/dtls13"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	"github.com/kulikov0/headlessclient/webrtc"
 )
 
 var greaseValues = [...]uint16{

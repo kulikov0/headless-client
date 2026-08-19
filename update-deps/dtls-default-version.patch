@@ -1,0 +1,13 @@
+--- a/internal/config/util.go
++++ b/internal/config/util.go
+@@ -13,7 +13,9 @@
+ 		minVersion = protocol.Version1_2
+ 	}
+
+-	if !maxVersion.Equal(protocol.Version1_3) {
++	if maxVersion.Equal(protocol.Version{}) {
++		maxVersion = protocol.Version1_3
++	} else if !maxVersion.Equal(protocol.Version1_3) {
+ 		maxVersion = protocol.Version1_2
+ 	}
+

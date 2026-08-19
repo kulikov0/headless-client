@@ -1,0 +1,140 @@
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
+package flight13
+
+import (
+	"bytes"
+	"crypto"
+	"crypto/tls"
+
+	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
+	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/signaturehash"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
+	extension13 "github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension/dtls13"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+)
+
+func flight5Generate(
+	_ dtlsflight.Conn,
+	flightCtx *handshakeContext,
+) ([]*dtlsflight.Packet, *alert.Alert, error) {
+	pkts, dtlsAlert, err := flight5ClientAuthPackets(flightCtx)
+	if err != nil {
+		return nil, dtlsAlert, err
+	}
+	pkts = append(pkts, HandshakePacket(&handshake.MessageFinished{}))
+	pkts[0].ResetLocalSequenceNumber = true
+
+	return pkts, nil, nil
+}
+
+func flight5ClientAuthPackets(
+	flightCtx *handshakeContext,
+) ([]*dtlsflight.Packet, *alert.Alert, error) {
+	certificateRequest := flightCtx.state.RemoteCertificateRequest
+	if certificateRequest == nil {
+		return []*dtlsflight.Packet{}, nil, nil
+	}
+
+	certificate, err := flight5ClientCertificate(flightCtx.cfg, certificateRequest)
+	if err != nil {
+		return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, err
+	}
+	if len(certificate.Certificate) == 0 {
+		return []*dtlsflight.Packet{
+			HandshakePacket(&handshake.MessageCertificate13{
+				CertificateRequestContext: append(
+					[]byte(nil),
+					certificateRequest.CertificateRequestContext...,
+				),
+			}),
+		}, nil, nil
+	}
+
+	signer, ok := certificate.PrivateKey.(crypto.Signer)
+	if !ok {
+		return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure},
+			dtlserrors.ErrInvalidPrivateKey
+	}
+
+	signatureScheme, err := signaturehash.SelectSignatureScheme13(
+		certificateRequestSignatureSchemes(certificateRequest),
+		signer,
+	)
+	if err != nil {
+		return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, err
+	}
+
+	return []*dtlsflight.Packet{
+		HandshakePacket(&handshake.MessageCertificate13{
+			CertificateRequestContext: append(
+				[]byte(nil),
+				certificateRequest.CertificateRequestContext...,
+			),
+			CertificateList: certificateEntries(certificate.Certificate),
+		}),
+		CertificateVerifyPacket(
+			&handshake.MessageCertificateVerify{
+				HashAlgorithm:      signatureScheme.Hash,
+				SignatureAlgorithm: signatureScheme.Signature,
+			},
+			signer,
+		),
+	}, nil, nil
+}
+
+func flight5ClientCertificate(
+	cfg *dtlsconfig.HandshakeConfig,
+	request *handshake.MessageCertificateRequest13,
+) (*tls.Certificate, error) {
+	requestInfo := &dtlsconfig.CertificateRequestInfo{
+		SignatureSchemes: certificateRequestSignatureSchemes(request),
+	}
+	for _, ext := range request.Extensions {
+		if authorities, ok := ext.(*extension13.CertificateAuthorities); ok {
+			requestInfo.AcceptableCAs = make([][]byte, len(authorities.Authorities))
+			for i := range authorities.Authorities {
+				requestInfo.AcceptableCAs[i] = bytes.Clone(authorities.Authorities[i])
+			}
+
+			break
+		}
+	}
+
+	certificate, err := cfg.GetClientCertificate(requestInfo)
+	if err != nil {
+		return nil, err
+	}
+	if certificate == nil {
+		return &tls.Certificate{}, nil
+	}
+
+	return certificate, nil
+}
+
+func certificateRequestSignatureSchemes(
+	request *handshake.MessageCertificateRequest13,
+) []signaturehash.Algorithm {
+	for _, ext := range request.Extensions {
+		if algorithms, ok := ext.(*extension.SignatureAlgorithms); ok {
+			return dtlsflight.SignatureSchemes(algorithms.Schemes)
+		}
+	}
+
+	return nil
+}
+
+func certificateEntries(certificates [][]byte) []handshake.CertificateEntry13 {
+	entries := make([]handshake.CertificateEntry13, 0, len(certificates))
+	for _, certificate := range certificates {
+		entries = append(entries, handshake.CertificateEntry13{
+			CertificateData: bytes.Clone(certificate),
+		})
+	}
+
+	return entries
+}

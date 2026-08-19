@@ -1,0 +1,152 @@
+--- a/transport.go
++++ b/transport.go
+@@ -57,6 +57,11 @@
+ 	// defaultMaxConcurrentStreams is a connections default maxConcurrentStreams
+ 	// if the server doesn't include one in its initial SETTINGS frame.
+ 	defaultMaxConcurrentStreams = 1000
++
++	chromeHeaderTableSize   = 65536
++	chromeInitialWindowSize = 6291456
++	chromeMaxHeaderListSize = 262144
++	chromeConnFlowIncrement = 15663105
+ )
+ 
+ type transportInternal struct {
+@@ -510,7 +515,7 @@
+ 	if t.CountError != nil {
+ 		cc.fr.countError = t.CountError
+ 	}
+-	maxHeaderTableSize := conf.MaxDecoderHeaderTableSize
++	maxHeaderTableSize := uint32(chromeHeaderTableSize)
+ 	cc.fr.ReadMetaHeaders = hpack.NewDecoder(maxHeaderTableSize, nil)
+ 	cc.fr.MaxHeaderListSize = t.maxHeaderListSize()
+ 
+@@ -523,22 +528,19 @@
+ 		cc.tlsState = &state
+ 	}
+ 
++	cc.initialStreamRecvWindowSize = chromeInitialWindowSize
++	cc.fr.MaxHeaderListSize = chromeMaxHeaderListSize
+ 	initialSettings := []Setting{
++		{ID: SettingHeaderTableSize, Val: chromeHeaderTableSize},
+ 		{ID: SettingEnablePush, Val: 0},
+ 		{ID: SettingInitialWindowSize, Val: uint32(cc.initialStreamRecvWindowSize)},
+-	}
+-	initialSettings = append(initialSettings, Setting{ID: SettingMaxFrameSize, Val: conf.MaxReadFrameSize})
+-	if max := t.maxHeaderListSize(); max != 0 {
+-		initialSettings = append(initialSettings, Setting{ID: SettingMaxHeaderListSize, Val: max})
+-	}
+-	if maxHeaderTableSize != initialHeaderTableSize {
+-		initialSettings = append(initialSettings, Setting{ID: SettingHeaderTableSize, Val: maxHeaderTableSize})
++		{ID: SettingMaxHeaderListSize, Val: chromeMaxHeaderListSize},
+ 	}
+ 
+ 	cc.bw.Write(clientPreface)
+ 	cc.fr.WriteSettings(initialSettings...)
+-	cc.fr.WriteWindowUpdate(0, uint32(conf.MaxUploadBufferPerConnection))
+-	cc.inflow.init(conf.MaxUploadBufferPerConnection + initialWindowSize)
++	cc.fr.WriteWindowUpdate(0, chromeConnFlowIncrement)
++	cc.inflow.init(chromeConnFlowIncrement + initialWindowSize)
+ 	cc.bw.Flush()
+ 	if cc.werr != nil {
+ 		cc.Close()
+--- a/internal/httpcommon/request.go
++++ b/internal/httpcommon/request.go
+@@ -57,6 +57,54 @@
+ 	HasTrailers bool
+ }
+ 
++var chromeHeaderOrder = []string{
++	"content-length",
++	"user-agent",
++	"accept-language",
++	"content-type",
++	"accept",
++	"origin",
++	"sec-fetch-site",
++	"sec-fetch-mode",
++	"sec-fetch-user",
++	"sec-fetch-dest",
++	"sec-fetch-storage-access",
++	"upgrade-insecure-requests",
++	"referer",
++	"accept-encoding",
++	"cookie",
++	"priority",
++}
++
++var chromeHeaderRank = buildChromeHeaderRank()
++
++func buildChromeHeaderRank() map[string]int {
++	rank := make(map[string]int, len(chromeHeaderOrder))
++	for index, name := range chromeHeaderOrder {
++		rank[name] = index
++	}
++	return rank
++}
++
++func orderedHeaderKeys(header map[string][]string) []string {
++	keys := make([]string, 0, len(header))
++	for name := range header {
++		keys = append(keys, name)
++	}
++	sort.SliceStable(keys, func(i, j int) bool {
++		firstRank, firstKnown := chromeHeaderRank[strings.ToLower(keys[i])]
++		secondRank, secondKnown := chromeHeaderRank[strings.ToLower(keys[j])]
++		if firstKnown && secondKnown {
++			return firstRank < secondRank
++		}
++		if firstKnown != secondKnown {
++			return firstKnown
++		}
++		return keys[i] < keys[j]
++	})
++	return keys
++}
++
+ // EncodeHeaders constructs request headers common to HTTP/2 and HTTP/3.
+ // It validates a request and calls headerf with each pseudo-header and header
+ // for the request.
+@@ -135,25 +183,29 @@
+ 		// target URI (the path-absolute production and optionally a '?' character
+ 		// followed by the query production, see Sections 3.3 and 3.4 of
+ 		// [RFC3986]).
+-		f(":authority", host)
+ 		m := req.Method
+ 		if m == "" {
+ 			m = "GET"
+ 		}
+ 		f(":method", m)
++		f(":authority", host)
+ 		if !isNormalConnect {
+-			f(":path", path)
+ 			f(":scheme", req.URL.Scheme)
++			f(":path", path)
+ 		}
+ 		if protocol != "" {
+ 			f(":protocol", protocol)
+ 		}
+ 		if trailers != "" {
+ 			f("trailer", trailers)
++		}
++		if shouldSendReqContentLength(req.Method, req.ActualContentLength) {
++			f("content-length", strconv.FormatInt(req.ActualContentLength, 10))
+ 		}
+ 
+ 		var didUA bool
+-		for k, vv := range req.Header {
++		for _, k := range orderedHeaderKeys(req.Header) {
++			vv := req.Header[k]
+ 			if asciiEqualFold(k, "host") || asciiEqualFold(k, "content-length") {
+ 				// Host is :authority, already sent.
+ 				// Content-Length is automatic, set below.
+@@ -213,9 +265,6 @@
+ 				f(k, v)
+ 			}
+ 		}
+-		if shouldSendReqContentLength(req.Method, req.ActualContentLength) {
+-			f("content-length", strconv.FormatInt(req.ActualContentLength, 10))
+-		}
+ 		if param.AddGzipHeader {
+ 			f("accept-encoding", "gzip")
+ 		}

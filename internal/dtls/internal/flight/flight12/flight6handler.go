@@ -1,0 +1,93 @@
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
+package flight12
+
+import (
+	"context"
+
+	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
+	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/prf"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+)
+
+func flight6Parse(
+	_ context.Context,
+	_ dtlsflight.Conn,
+	state *dtlsstate.State12,
+	cache *dtlsflight.Cache,
+	cfg *dtlsconfig.HandshakeConfig,
+) (Flight, *alert.Alert, error) {
+	pull := cache.FullPullMapItems(state.HandshakeRecvSequence-1, state.CipherSuite,
+		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeFinished, Epoch: cfg.InitialEpoch + 1, IsClient: true, Optional: false}, //nolint:lll
+	)
+	if pull.Err != nil {
+		return 0, nil, pull.Err
+	}
+	if !pull.Ready {
+		// No valid message received. Keep reading
+		return 0, nil, nil
+	}
+
+	if _, ok := pull.Messages[handshake.TypeFinished].(*handshake.MessageFinished); !ok {
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, nil
+	}
+
+	// Other party may re-transmit the last  Keep state to be Flight6.
+	return Flight6, nil, nil
+}
+
+func flight6Generate(
+	_ dtlsflight.Conn,
+	state *dtlsstate.State12,
+	cache *dtlsflight.Cache,
+	cfg *dtlsconfig.HandshakeConfig,
+) ([]*dtlsflight.Packet, *alert.Alert, error) {
+	var pkts []*dtlsflight.Packet
+
+	pkts = append(pkts,
+		&dtlsflight.Packet{
+			Record: &recordlayer.RecordLayer{
+				Header: recordlayer.Header{
+					Version: protocol.Version1_2,
+				},
+				Content: &protocol.ChangeCipherSpec{},
+			},
+		})
+
+	if len(state.LocalVerifyData) == 0 {
+		plainText := cache.PullAndMerge(handshakeRulesThroughClientFinished(cfg.InitialEpoch)...)
+
+		var err error
+		state.LocalVerifyData, err = prf.VerifyDataServer(state.MasterSecret, plainText, state.CipherSuite.HashFunc())
+		if err != nil {
+			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
+		}
+	}
+
+	pkts = append(pkts,
+		&dtlsflight.Packet{
+			Record: &recordlayer.RecordLayer{
+				Header: recordlayer.Header{
+					Version: protocol.Version1_2,
+					Epoch:   1,
+				},
+				Content: &handshake.Handshake{
+					Message: &handshake.MessageFinished{
+						VerifyData: state.LocalVerifyData,
+					},
+				},
+			},
+			ShouldWrapCID:            state.ShouldWrapConnectionID(),
+			ShouldEncrypt:            true,
+			ResetLocalSequenceNumber: true,
+		},
+	)
+
+	return pkts, nil, nil
+}

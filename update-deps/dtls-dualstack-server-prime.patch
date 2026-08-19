@@ -1,0 +1,14 @@
+diff --git a/conn.go b/conn.go
+index 3f8dcfc..89b8dd4 100644
+--- a/conn.go
++++ b/conn.go
+@@ -459,6 +459,9 @@ func (c *Conn) prepareDualStackServerHandshakeStart(ctx context.Context) (handsh
+ 		flight12: dtlsflight12.Flight0,
+ 		flight13: dtlsflight13.Flight0,
+ 		fsmState: dtlshandshake.StatePreparing,
++		postSetup: func(ctx context.Context) {
++			c.primeHandshakeRecv(ctx)
++		},
+ 	}, nil
+ }
+ 

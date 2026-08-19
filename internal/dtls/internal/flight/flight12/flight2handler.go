@@ -1,0 +1,88 @@
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
+package flight12
+
+import (
+	"bytes"
+	"context"
+
+	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
+	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+)
+
+func flight2Parse(
+	ctx context.Context,
+	conn dtlsflight.Conn,
+	state *dtlsstate.State12,
+	cache *dtlsflight.Cache,
+	cfg *dtlsconfig.HandshakeConfig,
+) (Flight, *alert.Alert, error) {
+	pull := cache.FullPullMapItems(state.HandshakeRecvSequence, state.CipherSuite,
+		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeClientHello, Epoch: cfg.InitialEpoch, IsClient: true, Optional: false}, //nolint:lll
+	)
+	if pull.Err != nil {
+		return 0, nil, pull.Err
+	}
+	if !pull.Ready {
+		// Client may retransmit the first ClientHello when HelloVerifyRequest is dropped.
+		// Parse as flight 0 in this case.
+		return flight0Parse(ctx, conn, state, cache, cfg)
+	}
+	state.HandshakeRecvSequence = pull.NextSequence
+
+	// Validate type
+	clientHello, ok := pull.Messages[handshake.TypeClientHello].(*handshake.MessageClientHello)
+	if !ok {
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, nil
+	}
+
+	if !clientHello.Version.Equal(protocol.Version1_2) {
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.ProtocolVersion},
+			dtlserrors.ErrUnsupportedProtocolVersion
+	}
+
+	if len(clientHello.Cookie) == 0 {
+		return 0, nil, nil
+	}
+	if !bytes.Equal(state.Cookie, clientHello.Cookie) {
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.AccessDenied}, dtlserrors.ErrCookieMismatch
+	}
+
+	if err := state.RemoteClientHelloSnapshots.RecordWire(pull.Items[0].Raw.Data); err != nil {
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.IllegalParameter}, err
+	}
+
+	return Flight4, nil, nil
+}
+
+func flight2Generate(
+	_ dtlsflight.Conn,
+	state *dtlsstate.State12,
+	_ *dtlsflight.Cache,
+	_ *dtlsconfig.HandshakeConfig,
+) ([]*dtlsflight.Packet, *alert.Alert, error) {
+	state.HandshakeSendSequence = 0
+
+	return []*dtlsflight.Packet{
+		{
+			Record: &recordlayer.RecordLayer{
+				Header: recordlayer.Header{
+					Version: protocol.Version1_2,
+				},
+				Content: &handshake.Handshake{
+					Message: &handshake.MessageHelloVerifyRequest{
+						Version: protocol.Version1_2,
+						Cookie:  state.Cookie,
+					},
+				},
+			},
+		},
+	}, nil, nil
+}
