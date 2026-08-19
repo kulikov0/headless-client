@@ -19,7 +19,8 @@ fi
 rm -rf "$DST"
 cp -R "$SRC" "$DST"
 chmod -R u+w "$DST"
-rm -rf "$DST/.git" "$DST/go.mod" "$DST/go.sum"
+rm -rf "$DST/.git" "$DST/.github" "$DST/go.mod" "$DST/go.sum"
+find "$DST" -type d -name '.git' -exec rm -rf {} + 2>/dev/null || true
 find "$DST" -name '*_test.go' -delete
 find "$DST" -type d \( -name testdata -o -name examples -o -name e2e \) -exec rm -rf {} + 2>/dev/null || true
 rm -f "$DST/README.md" "$DST/codecov.yml" "$DST/renovate.json"

@@ -18,29 +18,39 @@ scripts.
 
 ## dtls.sh
 
-    ./update-deps/dtls.sh [path-to-dtls-fork]
+    ./update-deps/dtls.sh [path-to-dtls-checkout]
 
-Default source: ../dtls.
+The upstream commit is pinned in the COMMIT variable of the script. DTLS 1.3 is
+not released, so there is no module version to download and the source is a git
+checkout instead.
+
+Without an argument, the script fetches the pinned commit into a temporary
+directory and removes it when it exits. It does not need a local checkout.
+
+With an argument, the script uses that checkout. It prints a warning if the
+checkout is not at the pinned commit. Use this while developing against a local
+dtls tree.
+
+Both modes produce the same tree.
 
 Steps:
 
 1. Copy the source to internal/dtls.
-2. Remove .git, go.mod, go.sum, tests, testdata, examples, e2e, README.md,
-   codecov.yml, and renovate.json.
+2. Remove .git at any depth, .github, go.mod, go.sum, tests, testdata,
+   examples, e2e, README.md, codecov.yml, and renovate.json.
 3. Rewrite github.com/pion/dtls/v3 to the internal path.
 4. Copy the files from _dtls-files.
 5. Apply dtls-default-version.patch and dtls-dualstack-server-prime.patch.
 6. Build internal/dtls.
 
-The source can be a pristine upstream checkout. Changes this module makes on
-top of upstream are stored in update-deps, not in the source tree.
+Changes this module makes on top of upstream are stored in update-deps, not in
+the source tree.
 
 Patch application is idempotent. If a patch is already applied in the source,
 the script skips it instead of failing. A source with the local change and a
 source without it produce the same result.
 
-To update: run git fetch and git reset --hard origin/main in the source, then
-run this script.
+To move to a newer upstream commit, change COMMIT in the script and run it.
 
 ## webrtc.sh
 
@@ -54,8 +64,8 @@ internal/dtls.
 Steps:
 
 1. Download the module and copy it to webrtc.
-2. Remove .git, go.mod, go.sum, tests, testdata, examples, e2e, README.md,
-   codecov.yml, and renovate.json.
+2. Remove .git at any depth, .github, go.mod, go.sum, tests, testdata,
+   examples, e2e, README.md, codecov.yml, and renovate.json.
 3. Rewrite github.com/pion/webrtc/v4 to the webrtc path and
    github.com/pion/dtls/v3 to internal/dtls.
 4. Build webrtc.
