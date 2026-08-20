@@ -1,0 +1,28 @@
+--- a/websocket/client.go
++++ b/websocket/client.go
+@@ -14,6 +14,8 @@
+ 	"io/ioutil"
+ 	"net"
+ 	"net/http"
++
++	chromehttp1 "github.com/kulikov0/headlessclient/internal/chromehttp1"
+ 	"net/http/httptrace"
+ 	"net/url"
+ 	"strings"
+@@ -225,7 +227,6 @@
+ 			k == "Connection" ||
+ 			k == "Sec-Websocket-Key" ||
+ 			k == "Sec-Websocket-Version" ||
+-			k == "Sec-Websocket-Extensions" ||
+ 			(k == "Sec-Websocket-Protocol" && len(d.Subprotocols) > 0):
+ 			return nil, nil, errors.New("websocket: duplicate header not allowed: " + k)
+ 		case k == "Sec-Websocket-Protocol":
+@@ -359,7 +360,7 @@
+ 
+ 	conn := newConn(netConn, false, d.ReadBufferSize, d.WriteBufferSize, d.WriteBufferPool, nil, nil)
+ 
+-	if err := req.Write(netConn); err != nil {
++	if err := chromehttp1.WriteRequest(netConn, req); err != nil {
+ 		return nil, nil, err
+ 	}
+ 

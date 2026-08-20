@@ -12,9 +12,10 @@ import (
 	"sync"
 
 	"github.com/andybalholm/brotli"
-	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
+	http1 "github.com/kulikov0/headlessclient/internal/chromehttp1"
 	http2 "github.com/kulikov0/headlessclient/internal/chromehttp2"
+	"github.com/kulikov0/headlessclient/websocket"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -127,12 +128,7 @@ func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 		}
 		response, err = clientConn.RoundTrip(request)
 	} else {
-		oneShotTransport := &http.Transport{
-			DialTLSContext: func(context.Context, string, string) (net.Conn, error) {
-				return uConn, nil
-			},
-		}
-		response, err = oneShotTransport.RoundTrip(request)
+		response, err = http1.RoundTrip(uConn, request)
 	}
 	if err != nil {
 		return nil, err
