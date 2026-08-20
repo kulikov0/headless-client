@@ -8,6 +8,7 @@ const (
 	DestDocument RequestDest = iota
 	DestScript
 	DestEmpty
+	DestWebSocket
 )
 
 func (p Profile) UserAgent() string {
@@ -36,6 +37,11 @@ func (p Profile) Headers(dest RequestDest) http.Header {
 		header.Set("Sec-Fetch-Site", "same-site")
 		header.Set("Sec-Fetch-Mode", "cors")
 		header.Set("Sec-Fetch-Dest", "empty")
+	case DestWebSocket:
+		header.Set("Pragma", "no-cache")
+		header.Set("Cache-Control", "no-cache")
+		header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
+		header.Set("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
 	}
 	return header
 }
