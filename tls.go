@@ -14,8 +14,8 @@ import (
 	"github.com/andybalholm/brotli"
 	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
-	utls "github.com/refraction-networking/utls"
 	http2 "github.com/kulikov0/headlessclient/internal/chromehttp2"
+	utls "github.com/refraction-networking/utls"
 )
 
 var (
@@ -39,19 +39,19 @@ func sharedKeyLog() io.Writer {
 }
 
 func (p Profile) HTTPClient() *http.Client {
-	return &http.Client{Transport: &chromeRoundTripper{keyLog: sharedKeyLog()}}
+	return &http.Client{Transport: &chromeRoundTripper{profile: p, keyLog: sharedKeyLog()}}
 }
 
 func (p Profile) WebSocketDialer() *websocket.Dialer {
 	keyLog := sharedKeyLog()
 	dialer := *websocket.DefaultDialer
 	dialer.NetDialTLSContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		return dialChromeTLS(ctx, network, address, keyLog, []string{"http/1.1"})
+		return p.dialTLS(ctx, network, address, keyLog, []string{"http/1.1"})
 	}
 	return &dialer
 }
 
-func dialChromeTLS(ctx context.Context, network, address string, keyLog io.Writer, alpnOverride []string) (net.Conn, error) {
+func (p Profile) dialTLS(ctx context.Context, network, address string, keyLog io.Writer, alpnOverride []string) (net.Conn, error) {
 	rawConn, err := (&net.Dialer{}).DialContext(ctx, network, address)
 	if err != nil {
 		return nil, err
@@ -61,12 +61,13 @@ func dialChromeTLS(ctx context.Context, network, address string, keyLog io.Write
 		serverName = address
 	}
 	config := &utls.Config{ServerName: serverName, KeyLogWriter: keyLog}
+	clientHelloID := p.ClientHelloID()
 
 	var uConn *utls.UConn
 	if alpnOverride == nil {
-		uConn = utls.UClient(rawConn, config, utls.HelloChrome_Auto)
+		uConn = utls.UClient(rawConn, config, clientHelloID)
 	} else {
-		spec, specErr := utls.UTLSIdToSpec(utls.HelloChrome_Auto)
+		spec, specErr := utls.UTLSIdToSpec(clientHelloID)
 		if specErr != nil {
 			rawConn.Close()
 			return nil, specErr
@@ -97,7 +98,8 @@ func dialChromeTLS(ctx context.Context, network, address string, keyLog io.Write
 }
 
 type chromeRoundTripper struct {
-	keyLog io.Writer
+	profile Profile
+	keyLog  io.Writer
 }
 
 func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -111,7 +113,7 @@ func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 	}
 	address := net.JoinHostPort(request.URL.Hostname(), port)
 
-	uConn, err := dialChromeTLS(request.Context(), "tcp", address, t.keyLog, nil)
+	uConn, err := t.profile.dialTLS(request.Context(), "tcp", address, t.keyLog, nil)
 	if err != nil {
 		return nil, err
 	}
