@@ -39,10 +39,16 @@ var chrome13ExtensionOrder = []uint16{
 	65281, 43, 45, 10, 51, 11, 13, 23, 14,
 }
 
+var chromeServerHelloExtensionOrder = []uint16{
+	23, 65281, 11, 14,
+}
+
 func (p Profile) ApplyWebRTC(settingEngine *webrtc.SettingEngine) {
 	if settingEngine == nil {
 		return
 	}
+	settingEngine.SetSRTPProtectionProfiles(chrome13SRTPProtectionProfiles...)
+	settingEngine.SetDTLSServerHelloMessageHook(p.dtlsServerHelloHook)
 	if p.dtlsMimicChrome13 {
 		settingEngine.SetDTLSClientHelloMessageHook(p.dtlsMimicChrome13Hook)
 		return
@@ -50,6 +56,34 @@ func (p Profile) ApplyWebRTC(settingEngine *webrtc.SettingEngine) {
 	if p.dtlsShuffle || p.dtlsGREASE {
 		settingEngine.SetDTLSClientHelloMessageHook(p.dtlsClientHelloHook)
 	}
+}
+
+func (p Profile) dtlsServerHelloHook(serverHello handshake.MessageServerHello) handshake.Message {
+	serverHello.Extensions = orderExtensions(serverHello.Extensions, chromeServerHelloExtensionOrder)
+	return &serverHello
+}
+
+func orderExtensions(extensions []extension.Value, canonicalOrder []uint16) []extension.Value {
+	byType := make(map[uint16]extension.Value, len(extensions))
+	for _, ext := range extensions {
+		byType[uint16(ext.ExtensionType())] = ext
+	}
+
+	ordered := make([]extension.Value, 0, len(extensions))
+	placed := make(map[uint16]bool, len(canonicalOrder))
+	for _, extensionType := range canonicalOrder {
+		if ext, ok := byType[extensionType]; ok {
+			ordered = append(ordered, ext)
+			placed[extensionType] = true
+		}
+	}
+	for _, ext := range extensions {
+		if !placed[uint16(ext.ExtensionType())] {
+			ordered = append(ordered, ext)
+		}
+	}
+
+	return ordered
 }
 
 func (p Profile) dtlsClientHelloHook(clientHello handshake.MessageClientHello) handshake.Message {
@@ -96,27 +130,15 @@ func (p Profile) dtlsMimicChrome13Hook(clientHello handshake.MessageClientHello)
 		srtpOffer.ProtectionProfiles = reorderSRTPProfiles(srtpOffer.ProtectionProfiles)
 	}
 
+	present := make([]extension.Value, 0, len(clientHello.Extensions)+1)
+	present = append(present, clientHello.Extensions...)
 	if _, ok := extensionsByType[45]; !ok {
-		extensionsByType[45] = &dtls13.PSKKeyExchangeModes{
+		present = append(present, &dtls13.PSKKeyExchangeModes{
 			Modes: []dtls13.PSKKeyExchangeMode{dtls13.PSKDHEKE},
-		}
+		})
 	}
 
-	ordered := make([]extension.Value, 0, len(clientHello.Extensions))
-	placed := make(map[uint16]bool, len(chrome13ExtensionOrder))
-	for _, extensionType := range chrome13ExtensionOrder {
-		if ext, ok := extensionsByType[extensionType]; ok {
-			ordered = append(ordered, ext)
-			placed[extensionType] = true
-		}
-	}
-	for _, ext := range clientHello.Extensions {
-		if !placed[uint16(ext.ExtensionType())] {
-			ordered = append(ordered, ext)
-		}
-	}
-
-	clientHello.Extensions = ordered
+	clientHello.Extensions = orderExtensions(present, chrome13ExtensionOrder)
 	clientHello.CipherSuiteIDs = append([]uint16(nil), chrome13CipherSuiteIDs...)
 	return &clientHello
 }

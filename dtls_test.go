@@ -3,6 +3,7 @@ package headlessclient
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
@@ -191,5 +192,85 @@ func TestDTLSClientHelloStableForSameRandom(t *testing.T) {
 	}
 	if !bytes.Equal(firstBytes, secondBytes) {
 		t.Fatal("same client random must produce an identical client hello across flights")
+	}
+}
+
+func pionDefaultServerHello() handshake.MessageServerHello {
+	cipherSuiteID := uint16(0xc02b)
+
+	return handshake.MessageServerHello{
+		Version:           protocol.Version{Major: 0xfe, Minor: 0xfd},
+		CipherSuiteID:     &cipherSuiteID,
+		CompressionMethod: protocol.CompressionMethods()[0],
+		Extensions: []extension.Value{
+			&dtls12.ExtendedMasterSecret{},
+			&extension.SRTPSelection{ProtectionProfile: extension.SRTP_AEAD_AES_256_GCM},
+			&dtls12.RenegotiationInfo{RenegotiatedConnection: 0},
+			&dtls12.SupportedPointFormats{PointFormats: []elliptic.CurvePointFormat{elliptic.CurvePointFormatUncompressed}},
+		},
+	}
+}
+
+func serverHelloExtensionOrder(message handshake.Message) []extension.Type {
+	serverHello, ok := message.(*handshake.MessageServerHello)
+	if !ok {
+		return nil
+	}
+	order := make([]extension.Type, 0, len(serverHello.Extensions))
+	for _, ext := range serverHello.Extensions {
+		order = append(order, ext.ExtensionType())
+	}
+
+	return order
+}
+
+func TestDTLSServerHelloUsesChromeExtensionOrder(t *testing.T) {
+	input := pionDefaultServerHello()
+	before := serverHelloExtensionOrder(&input)
+	if fmt.Sprint(before) != fmt.Sprint([]extension.Type{23, 14, 65281, 11}) {
+		t.Fatalf("fixture is not the pion order, got %v", before)
+	}
+
+	output := ChromeWindows.dtlsServerHelloHook(pionDefaultServerHello())
+	after := serverHelloExtensionOrder(output)
+	if fmt.Sprint(after) != fmt.Sprint([]extension.Type{23, 65281, 11, 14}) {
+		t.Fatalf("server hello order = %v, want the chrome order [23 65281 11 14]", after)
+	}
+
+	if _, err := output.Marshal(); err != nil {
+		t.Fatalf("marshal server hello: %v", err)
+	}
+}
+
+func TestDTLSServerHelloKeepsUnknownExtensions(t *testing.T) {
+	input := pionDefaultServerHello()
+	input.Extensions = append(input.Extensions, greaseExtension{value: 0x3a3a})
+
+	after := serverHelloExtensionOrder(ChromeWindows.dtlsServerHelloHook(input))
+	if fmt.Sprint(after) != fmt.Sprint([]extension.Type{23, 65281, 11, 14, 0x3a3a}) {
+		t.Fatalf("server hello order = %v, an unordered extension must survive at the end", after)
+	}
+}
+
+func TestChromeSRTPProfileOrderSelectsSHA1OverGCM(t *testing.T) {
+	if chrome13SRTPProtectionProfiles[0] != extension.SRTP_AES128_CM_HMAC_SHA1_80 {
+		t.Fatalf("first profile = %v, chrome offers SRTP_AES128_CM_HMAC_SHA1_80 first", chrome13SRTPProtectionProfiles[0])
+	}
+
+	peerOffer := []extension.SRTPProtectionProfile{
+		extension.SRTP_AEAD_AES_256_GCM,
+		extension.SRTP_AEAD_AES_128_GCM,
+		extension.SRTP_AES128_CM_HMAC_SHA1_80,
+	}
+	var selected extension.SRTPProtectionProfile
+	for _, candidate := range chrome13SRTPProtectionProfiles {
+		if slices.Contains(peerOffer, candidate) {
+			selected = candidate
+
+			break
+		}
+	}
+	if selected != extension.SRTP_AES128_CM_HMAC_SHA1_80 {
+		t.Fatalf("selected profile = %v, want SRTP_AES128_CM_HMAC_SHA1_80", selected)
 	}
 }
