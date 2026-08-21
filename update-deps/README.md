@@ -4,8 +4,11 @@ Scripts that regenerate the vendored packages in this module. A vendored
 package is a copy of a third-party module with its import paths rewritten to a
 path inside this module.
 
-Do not edit internal/dtls, internal/chromehttp2, or webrtc by hand. Run the
-scripts.
+Do not edit internal/dtls, internal/chromehttp2, webrtc, or websocket by hand.
+Run the scripts.
+
+internal/chromehttp1 is not vendored. Edit it directly. See
+"internal/chromehttp1".
 
 ## Packages
 
@@ -15,6 +18,8 @@ scripts.
   import it.
 - internal/chromehttp2: the http2, internal/httpcommon, and internal/httpsfv
   packages of golang.org/x/net, with the HTTP/2 fingerprint patch.
+- websocket: github.com/gorilla/websocket with the Chrome handshake patch. It is
+  at the top level because consumers import it.
 
 ## dtls.sh
 
@@ -86,6 +91,47 @@ Steps:
 5. Apply chromehttp2-fingerprint.patch.
 6. Copy the tests from _chromehttp2-tests.
 7. Build and test internal/chromehttp2.
+
+## websocket.sh
+
+    ./update-deps/websocket.sh [version]
+
+Default version: v1.5.3.
+
+Steps:
+
+1. Download the module and copy it to websocket.
+2. Remove .git at any depth, .github, .circleci, go.mod, go.sum, tests,
+   testdata, examples, e2e, README.md, codecov.yml, renovate.json,
+   .golangci.yml, and .gitignore.
+3. Rewrite github.com/gorilla/websocket to the websocket path.
+4. Apply websocket-chrome-handshake.patch.
+5. Build websocket.
+
+## internal/chromehttp1
+
+This package is not vendored. It has no upstream and no script. Edit it
+directly.
+
+The package writes HTTP/1.1 requests in Chrome's header order. net/http sorts
+headers alphabetically, which identifies the client as a Go program.
+
+To update the package, re-measure Chrome. The chromeHTTP1HeaderOrder constant
+comes from a browser packet capture. When Chrome changes its header order, take
+a new capture, extract the order, and update the constant and the tests in
+request_test.go.
+
+websocket-chrome-handshake.patch calls chromehttp1.WriteRequest. If you change
+that signature, the patched websocket tree does not compile. websocket.sh builds
+websocket as its last step, so the failure appears when you run the script.
+
+## websocket-chrome-handshake.patch
+
+Changes websocket/client.go in two places. The upgrade request is written with
+chromehttp1.WriteRequest instead of req.Write, so the request uses Chrome's
+header order. Sec-Websocket-Extensions is removed from the forbidden-header
+list, so a caller can set Chrome's permessage-deflate parameters. Applied by
+websocket.sh.
 
 ## dtls-default-version.patch
 

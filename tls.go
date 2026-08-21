@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
@@ -46,8 +47,19 @@ type TLSOptions struct {
 	InsecureSkipVerify bool
 }
 
+var sharedTransports sync.Map
+
 func (p Profile) HTTPClient() *http.Client {
-	return &http.Client{Transport: p.Transport(TLSOptions{})}
+	return &http.Client{Transport: p.sharedTransport()}
+}
+
+func (p Profile) sharedTransport() http.RoundTripper {
+	if transport, ok := sharedTransports.Load(p); ok {
+		return transport.(http.RoundTripper)
+	}
+	transport, _ := sharedTransports.LoadOrStore(p, p.Transport(TLSOptions{}))
+
+	return transport.(http.RoundTripper)
 }
 
 func (p Profile) Transport(options TLSOptions) http.RoundTripper {
@@ -148,10 +160,25 @@ func (p Profile) dialTLS(ctx context.Context, network, address string, keyLog io
 	return uConn, nil
 }
 
+const (
+	chromeMaxIdleConnectionsPerHost = 6
+	chromeIdleConnectionTimeout     = 300 * time.Second
+)
+
+type idleConnection struct {
+	connection *http1.Conn
+	expiresAt  time.Time
+}
+
 type chromeRoundTripper struct {
-	profile Profile
-	keyLog  io.Writer
-	options TLSOptions
+	profile        Profile
+	keyLog         io.Writer
+	options        TLSOptions
+	http2Transport http2.Transport
+
+	mu               sync.Mutex
+	idleConnections  map[string][]idleConnection
+	http2Connections map[string]*http2.ClientConn
 }
 
 func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -165,21 +192,17 @@ func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 	}
 	address := net.JoinHostPort(request.URL.Hostname(), port)
 
-	uConn, err := t.profile.dialTLS(request.Context(), "tcp", address, t.keyLog, nil, t.options)
-	if err != nil {
-		return nil, err
-	}
-
-	var response *http.Response
-	if uConn.(*utls.UConn).ConnectionState().NegotiatedProtocol == http2.NextProtoTLS {
-		clientConn, connErr := (&http2.Transport{}).NewClientConn(uConn)
-		if connErr != nil {
-			uConn.Close()
-			return nil, connErr
+	response, reused, err := t.roundTripOnIdle(request, address)
+	if err != nil && reused {
+		replay, replayable := replayableRequest(request)
+		if !replayable {
+			return nil, err
 		}
-		response, err = clientConn.RoundTrip(request)
-	} else {
-		response, err = http1.RoundTrip(uConn, request)
+		request = replay
+		response, err = nil, nil
+	}
+	if response == nil && err == nil {
+		response, err = t.roundTripOnNew(request, address)
 	}
 	if err != nil {
 		return nil, err
@@ -187,6 +210,139 @@ func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 
 	decompressResponse(response)
 	return response, nil
+}
+
+func (t *chromeRoundTripper) roundTripOnIdle(request *http.Request, address string) (*http.Response, bool, error) {
+	t.mu.Lock()
+	clientConn := t.http2Connections[address]
+	if clientConn != nil && !clientConn.CanTakeNewRequest() {
+		delete(t.http2Connections, address)
+		clientConn = nil
+	}
+	t.mu.Unlock()
+	if clientConn != nil {
+		response, err := clientConn.RoundTrip(request)
+		return response, true, err
+	}
+
+	connection := t.takeIdle(address)
+	if connection == nil {
+		return nil, false, nil
+	}
+	response, err := connection.RoundTrip(request)
+	if err != nil {
+		connection.Close()
+	}
+
+	return response, true, err
+}
+
+func (t *chromeRoundTripper) roundTripOnNew(request *http.Request, address string) (*http.Response, error) {
+	uConn, err := t.profile.dialTLS(request.Context(), "tcp", address, t.keyLog, nil, t.options)
+	if err != nil {
+		return nil, err
+	}
+
+	if uConn.(*utls.UConn).ConnectionState().NegotiatedProtocol == http2.NextProtoTLS {
+		clientConn, connErr := t.http2Transport.NewClientConn(uConn)
+		if connErr != nil {
+			uConn.Close()
+			return nil, connErr
+		}
+		t.mu.Lock()
+		if t.http2Connections == nil {
+			t.http2Connections = map[string]*http2.ClientConn{}
+		}
+		t.http2Connections[address] = clientConn
+		t.mu.Unlock()
+
+		return clientConn.RoundTrip(request)
+	}
+
+	connection := http1.NewConn(uConn)
+	connection.SetIdleHandler(func(idle *http1.Conn) { t.putIdle(address, idle) })
+	response, err := connection.RoundTrip(request)
+	if err != nil {
+		connection.Close()
+		return nil, err
+	}
+
+	return response, nil
+}
+
+func (t *chromeRoundTripper) takeIdle(address string) *http1.Conn {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now := time.Now()
+	for len(t.idleConnections[address]) > 0 {
+		pool := t.idleConnections[address]
+		last := pool[len(pool)-1]
+		t.idleConnections[address] = pool[:len(pool)-1]
+		if now.Before(last.expiresAt) && last.connection.Reusable() {
+			return last.connection
+		}
+		last.connection.Close()
+	}
+
+	return nil
+}
+
+func (t *chromeRoundTripper) putIdle(address string, connection *http1.Conn) {
+	if !connection.Reusable() {
+		connection.Close()
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.idleConnections == nil {
+		t.idleConnections = map[string][]idleConnection{}
+	}
+	if len(t.idleConnections[address]) >= chromeMaxIdleConnectionsPerHost {
+		connection.Close()
+		return
+	}
+	t.idleConnections[address] = append(t.idleConnections[address], idleConnection{
+		connection: connection,
+		expiresAt:  time.Now().Add(chromeIdleConnectionTimeout),
+	})
+}
+
+func (t *chromeRoundTripper) CloseIdleConnections() {
+	t.mu.Lock()
+	idle := t.idleConnections
+	clientConns := t.http2Connections
+	t.idleConnections = nil
+	t.http2Connections = nil
+	t.mu.Unlock()
+
+	for _, pool := range idle {
+		for _, entry := range pool {
+			entry.connection.Close()
+		}
+	}
+	for _, clientConn := range clientConns {
+		clientConn.Close()
+	}
+}
+
+func replayableRequest(request *http.Request) (*http.Request, bool) {
+	if request.Body == nil || request.Body == http.NoBody {
+		return request, true
+	}
+	if request.GetBody == nil {
+		return nil, false
+	}
+	body, err := request.GetBody()
+	if err != nil {
+		return nil, false
+	}
+	replay := request.Clone(request.Context())
+	replay.Body = body
+
+	return replay, true
 }
 
 func decompressResponse(response *http.Response) {

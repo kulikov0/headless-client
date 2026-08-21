@@ -1,7 +1,6 @@
 package chromehttp1
 
 import (
-	"bufio"
 	"io"
 	"net/http"
 	"sort"
@@ -134,33 +133,6 @@ func WriteRequest(writer io.Writer, request *http.Request) error {
 	}
 	defer request.Body.Close()
 	_, err := io.Copy(writer, request.Body)
-
-	return err
-}
-
-func RoundTrip(connection io.ReadWriteCloser, request *http.Request) (*http.Response, error) {
-	if err := WriteRequest(connection, request); err != nil {
-		connection.Close()
-		return nil, err
-	}
-	response, err := http.ReadResponse(bufio.NewReader(connection), request)
-	if err != nil {
-		connection.Close()
-		return nil, err
-	}
-	response.Body = &connectionClosingBody{ReadCloser: response.Body, connection: connection}
-
-	return response, nil
-}
-
-type connectionClosingBody struct {
-	io.ReadCloser
-	connection io.Closer
-}
-
-func (b *connectionClosingBody) Close() error {
-	err := b.ReadCloser.Close()
-	b.connection.Close()
 
 	return err
 }

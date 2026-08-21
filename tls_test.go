@@ -5,7 +5,11 @@ import (
 	"context"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -156,6 +160,114 @@ func TestWebSocketDialerIgnoresTheEnvironmentProxy(t *testing.T) {
 	dialer := ChromeWindows.WebSocketDialer(TLSOptions{})
 	if dialer.Proxy != nil {
 		t.Fatal("egress must come from TLSOptions.DialContext, not from HTTPS_PROXY")
+	}
+}
+
+func countingTLSServer(t *testing.T, http2Enabled bool, handler http.HandlerFunc) (string, *atomic.Int64) {
+	t.Helper()
+
+	var connections atomic.Int64
+	server := httptest.NewUnstartedServer(handler)
+	server.EnableHTTP2 = http2Enabled
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	return strings.TrimPrefix(server.URL, "https://"), &connections
+}
+
+func pooledClient(address string) *http.Client {
+	return &http.Client{Transport: ChromeWindows.Transport(TLSOptions{
+		InsecureSkipVerify: true,
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		},
+	})}
+}
+
+func drainRequests(t *testing.T, client *http.Client, count int) {
+	t.Helper()
+
+	for attempt := 0; attempt < count; attempt++ {
+		response, err := client.Get("https://example.com/")
+		if err != nil {
+			t.Fatalf("request %d: %v", attempt, err)
+		}
+		io.Copy(io.Discard, response.Body)
+		response.Body.Close()
+	}
+}
+
+func TestTransportReusesOneHTTP1Connection(t *testing.T) {
+	address, connections := countingTLSServer(t, false, func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, "ok")
+	})
+
+	drainRequests(t, pooledClient(address), 5)
+
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("opened %d connections for 5 requests, chrome keeps one for 300s", got)
+	}
+}
+
+func TestTransportReusesOneHTTP2Connection(t *testing.T) {
+	address, connections := countingTLSServer(t, true, func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, "ok")
+	})
+
+	drainRequests(t, pooledClient(address), 5)
+
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("opened %d connections for 5 requests, h2 multiplexes over one", got)
+	}
+}
+
+func TestTransportDoesNotPoolAConnectionTheServerClosed(t *testing.T) {
+	address, connections := countingTLSServer(t, false, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Connection", "close")
+		io.WriteString(w, "ok")
+	})
+
+	drainRequests(t, pooledClient(address), 3)
+
+	if got := connections.Load(); got != 3 {
+		t.Fatalf("opened %d connections, a Connection: close response must not be pooled", got)
+	}
+}
+
+func TestCloseIdleConnectionsDropsThePool(t *testing.T) {
+	address, connections := countingTLSServer(t, false, func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, "ok")
+	})
+
+	client := pooledClient(address)
+	drainRequests(t, client, 2)
+	client.CloseIdleConnections()
+	drainRequests(t, client, 2)
+
+	if got := connections.Load(); got != 2 {
+		t.Fatalf("opened %d connections, want 1 before and 1 after the pool was dropped", got)
+	}
+}
+
+func TestHTTPClientSharesOnePoolPerProfile(t *testing.T) {
+	first := ChromeWindows.HTTPClient()
+	second := ChromeWindows.HTTPClient()
+	if first.Transport != second.Transport {
+		t.Fatal("a client built per request must still reuse the pool")
+	}
+
+	other := ChromeWindows.WithName("other").HTTPClient()
+	if other.Transport == first.Transport {
+		t.Fatal("distinct profiles must not share a pool")
+	}
+
+	if ChromeWindows.Transport(TLSOptions{}) == ChromeWindows.Transport(TLSOptions{}) {
+		t.Fatal("Transport returns a pool the caller owns, it must not be shared")
 	}
 }
 
