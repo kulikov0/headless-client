@@ -46,7 +46,7 @@ func requestWithHeaders(t *testing.T, target string, names ...string) *http.Requ
 }
 
 func TestChromeRequestReproducesTheDocumentOrder(t *testing.T) {
-	request := requestWithHeaders(t, "https://telemost.yandex.ru/",
+	request := requestWithHeaders(t, "https://example.com/",
 		"Upgrade-Insecure-Requests", "User-Agent", "Accept-Language", "Accept",
 		"Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest", "Accept-Encoding")
 
@@ -61,13 +61,13 @@ func TestChromeRequestReproducesTheDocumentOrder(t *testing.T) {
 }
 
 func TestChromeRequestReproducesTheXHROrder(t *testing.T) {
-	request := requestWithHeaders(t, "https://cloud-api.yandex.ru/v1/conferences",
-		"X-Telemost-Client-Version", "Client-Instance-Id", "User-Agent", "Content-Type",
+	request := requestWithHeaders(t, "https://api.example.com/v1/items",
+		"Client-Version", "X-Request-Id", "User-Agent", "Content-Type",
 		"Accept-Language", "Accept", "Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode",
 		"Sec-Fetch-Dest", "Referer", "Accept-Encoding", "Cookie")
 
 	want := []string{
-		"Host", "Connection", "Client-Instance-Id", "X-Telemost-Client-Version", "User-Agent",
+		"Host", "Connection", "Client-Version", "X-Request-Id", "User-Agent",
 		"Content-Type", "Accept-Language", "Accept", "Origin", "Sec-Fetch-Site",
 		"Sec-Fetch-Mode", "Sec-Fetch-Dest", "Referer", "Accept-Encoding", "Cookie",
 	}
@@ -77,7 +77,7 @@ func TestChromeRequestReproducesTheXHROrder(t *testing.T) {
 }
 
 func TestChromeRequestReproducesTheWebSocketOrder(t *testing.T) {
-	request := requestWithHeaders(t, "https://goloom.strm.yandex.net/ws",
+	request := requestWithHeaders(t, "https://ws.example.com/ws",
 		"Pragma", "Cache-Control", "User-Agent", "Accept-Language", "Upgrade", "Origin",
 		"Sec-WebSocket-Version", "Accept-Encoding", "Sec-WebSocket-Key", "Sec-WebSocket-Extensions")
 	request.Header.Set("Connection", "Upgrade")
@@ -145,12 +145,12 @@ func TestChromeRequestAddsConnectionAndContentLength(t *testing.T) {
 }
 
 func TestChromeRequestReproducesTheAPIPostOrder(t *testing.T) {
-	request, err := http.NewRequest(http.MethodPost, "https://cloud-api.yandex.ru/v1/conferences", strings.NewReader("{}"))
+	request, err := http.NewRequest(http.MethodPost, "https://api.example.com/v1/items", strings.NewReader("{}"))
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
 	for _, name := range []string{
-		"Client-Instance-Id", "User-Agent", "Content-Type", "Accept-Language", "Accept",
+		"X-Request-Id", "User-Agent", "Content-Type", "Accept-Language", "Accept",
 		"Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Referer",
 		"Accept-Encoding", "Cookie",
 	} {
@@ -158,7 +158,7 @@ func TestChromeRequestReproducesTheAPIPostOrder(t *testing.T) {
 	}
 
 	want := []string{
-		"Host", "Connection", "Content-Length", "Client-Instance-Id", "User-Agent",
+		"Host", "Connection", "Content-Length", "X-Request-Id", "User-Agent",
 		"Content-Type", "Accept-Language", "Accept", "Origin", "Sec-Fetch-Site",
 		"Sec-Fetch-Mode", "Sec-Fetch-Dest", "Referer", "Accept-Encoding", "Cookie",
 	}
@@ -168,7 +168,7 @@ func TestChromeRequestReproducesTheAPIPostOrder(t *testing.T) {
 }
 
 func TestChromeRequestFindsNonCanonicalHeaderKeys(t *testing.T) {
-	request, err := http.NewRequest(http.MethodGet, "https://goloom.strm.yandex.net/ws", nil)
+	request, err := http.NewRequest(http.MethodGet, "https://ws.example.com/ws", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
