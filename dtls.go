@@ -3,6 +3,7 @@ package headlessclient
 import (
 	"encoding/binary"
 	"math/rand"
+	"time"
 
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension/dtls13"
@@ -43,11 +44,29 @@ var chromeServerHelloExtensionOrder = []uint16{
 	23, 65281, 11, 14,
 }
 
+// chromeICEKeepaliveInterval is measured. libwebrtc sets
+// STRONG_AND_STABLE_WRITABLE_CONNECTION_PING_INTERVAL to 2500ms in
+// p2p/base/p2p_constants.cc. Chrome sends 2656ms on the wire. The 156ms
+// difference is unexplained.
+//
+// The value reproduced across five captures, two machines, three services and
+// RTTs from 0.05ms to 60ms, with medians within 0.5ms of each other. It is not
+// RTT, not capture noise and not drift.
+//
+// All reference captures are Chrome on Linux in a container. This profile
+// claims Windows. The value is unverified on Windows. Investigate later.
+const (
+	chromeICEKeepaliveInterval        = 2656 * time.Millisecond
+	pionDefaultICEDisconnectedTimeout = 5 * time.Second
+	pionDefaultICEFailedTimeout       = 25 * time.Second
+)
+
 func (p Profile) ApplyWebRTC(settingEngine *webrtc.SettingEngine) {
 	if settingEngine == nil {
 		return
 	}
 	settingEngine.SetSRTPProtectionProfiles(chromeSRTPProtectionProfiles...)
+	settingEngine.SetICETimeouts(pionDefaultICEDisconnectedTimeout, pionDefaultICEFailedTimeout, chromeICEKeepaliveInterval)
 	settingEngine.SetDTLSServerHelloMessageHook(p.dtlsServerHelloHook)
 	if p.dtls13Mimic {
 		settingEngine.SetDTLSClientHelloMessageHook(p.dtls13MimicHook)

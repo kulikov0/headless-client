@@ -41,6 +41,10 @@ func sharedKeyLog() io.Writer {
 	return keyLogWriter
 }
 
+func chromeDialer() *net.Dialer {
+	return &net.Dialer{KeepAlive: tcpKeepAliveDisabled}
+}
+
 type TLSOptions struct {
 	DialContext        func(ctx context.Context, network, address string) (net.Conn, error)
 	ServerName         string
@@ -124,7 +128,7 @@ func (p Profile) clientHelloSpec(alpnOverride []string) (*utls.ClientHelloSpec, 
 func (p Profile) dialTLS(ctx context.Context, network, address string, keyLog io.Writer, alpnOverride []string, options TLSOptions) (net.Conn, error) {
 	dialContext := options.DialContext
 	if dialContext == nil {
-		dialContext = (&net.Dialer{}).DialContext
+		dialContext = chromeDialer().DialContext
 	}
 	rawConn, err := dialContext(ctx, network, address)
 	if err != nil {
@@ -165,6 +169,7 @@ func (p Profile) dialTLS(ctx context.Context, network, address string, keyLog io
 const (
 	chromeMaxIdleConnectionsPerHost = 6
 	chromeIdleConnectionTimeout     = 300 * time.Second
+	tcpKeepAliveDisabled            = -1
 )
 
 type idleConnection struct {
