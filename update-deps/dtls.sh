@@ -72,5 +72,7 @@ if grep -rq "$OLD" "$DST" --include='*.go'; then
   exit 1
 fi
 
+gofmt -w "$DST"
+
 go -C "$REPO" build ./internal/dtls/...
 echo "internal/dtls regenerated from $SOURCE_LABEL at $COMMIT"

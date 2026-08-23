@@ -29,6 +29,7 @@ copy_nontest "$SRC/internal/httpcommon" "$DST/internal/httpcommon"
 copy_nontest "$SRC/internal/httpsfv" "$DST/internal/httpsfv"
 cp "$SRC/LICENSE" "$DST/LICENSE"
 cp "$SRC/PATENTS" "$DST/PATENTS"
+chmod -R u+w "$DST"
 
 grep -rl 'golang.org/x/net/internal/httpcommon\|golang.org/x/net/internal/httpsfv' "$DST" --include='*.go' | while read -r f; do
   perl -pi -e "s#golang\\.org/x/net/internal/httpcommon#$MOD/internal/httpcommon#g; s#golang\\.org/x/net/internal/httpsfv#$MOD/internal/httpsfv#g" "$f"
@@ -44,6 +45,8 @@ if grep -rq 'golang.org/x/net/internal' "$DST" --include='*.go'; then
   echo "residual golang.org/x/net/internal references remain" >&2
   exit 1
 fi
+
+gofmt -w "$DST"
 
 go -C "$REPO" build ./internal/chromehttp2/...
 go -C "$REPO" test ./internal/chromehttp2/...

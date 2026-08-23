@@ -15,9 +15,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kulikov0/headlessclient/internal/chromehttp2/internal/httpsfv"
 	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/http2/hpack"
-	"github.com/kulikov0/headlessclient/internal/chromehttp2/internal/httpsfv"
 )
 
 const frameHeaderLen = 9

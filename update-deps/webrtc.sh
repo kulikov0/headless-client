@@ -34,5 +34,7 @@ if grep -rq "$OLD_WEBRTC\|$OLD_DTLS" "$DST" --include='*.go'; then
   exit 1
 fi
 
+gofmt -w "$DST"
+
 go -C "$REPO" build ./webrtc/...
 echo "webrtc regenerated from $OLD_WEBRTC@$VERSION"

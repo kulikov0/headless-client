@@ -49,5 +49,7 @@ fi
 
 apply_patch "$UD/websocket-chrome-handshake.patch"
 
+gofmt -w "$DST"
+
 go -C "$REPO" build ./websocket/...
 echo "websocket regenerated from $OLD@$VERSION"
