@@ -52,15 +52,18 @@
  		cc.Close()
 --- a/internal/httpcommon/request.go
 +++ b/internal/httpcommon/request.go
-@@ -57,6 +57,54 @@
+@@ -57,6 +57,57 @@
  	HasTrailers bool
  }
  
 +var chromeHeaderOrder = []string{
 +	"content-length",
++	"sec-ch-ua-platform",
++	"upgrade-insecure-requests",
 +	"user-agent",
-+	"accept-language",
++	"sec-ch-ua",
 +	"content-type",
++	"sec-ch-ua-mobile",
 +	"accept",
 +	"origin",
 +	"sec-fetch-site",
@@ -68,9 +71,9 @@
 +	"sec-fetch-user",
 +	"sec-fetch-dest",
 +	"sec-fetch-storage-access",
-+	"upgrade-insecure-requests",
 +	"referer",
 +	"accept-encoding",
++	"accept-language",
 +	"cookie",
 +	"priority",
 +}

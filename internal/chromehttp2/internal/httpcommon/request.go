@@ -60,6 +60,7 @@ type EncodeHeadersResult struct {
 var chromeHeaderOrder = []string{
 	"content-length",
 	"sec-ch-ua-platform",
+	"upgrade-insecure-requests",
 	"user-agent",
 	"sec-ch-ua",
 	"content-type",
@@ -71,7 +72,6 @@ var chromeHeaderOrder = []string{
 	"sec-fetch-user",
 	"sec-fetch-dest",
 	"sec-fetch-storage-access",
-	"upgrade-insecure-requests",
 	"referer",
 	"accept-encoding",
 	"accept-language",
