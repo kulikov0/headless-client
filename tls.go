@@ -185,7 +185,7 @@ type chromeRoundTripper struct {
 
 func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request.Header.Get("Accept-Encoding") == "" {
-		request.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
+		request.Header.Set("Accept-Encoding", chromeAcceptEncoding)
 	}
 
 	port := request.URL.Port()
@@ -347,34 +347,64 @@ func replayableRequest(request *http.Request) (*http.Request, bool) {
 	return replay, true
 }
 
+type contentEncoding struct {
+	name      string
+	newReader func(io.Reader) (io.Reader, io.Closer, error)
+}
+
+var chromeContentEncodings = []contentEncoding{
+	{"gzip", func(source io.Reader) (io.Reader, io.Closer, error) {
+		reader, err := gzip.NewReader(source)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		return reader, reader, nil
+	}},
+	{"deflate", func(source io.Reader) (io.Reader, io.Closer, error) {
+		reader := flate.NewReader(source)
+
+		return reader, reader, nil
+	}},
+	{"br", func(source io.Reader) (io.Reader, io.Closer, error) {
+		return brotli.NewReader(source), nil, nil
+	}},
+	{"zstd", func(source io.Reader) (io.Reader, io.Closer, error) {
+		reader, err := zstd.NewReader(source)
+		if err != nil {
+			return nil, nil, err
+		}
+		readCloser := reader.IOReadCloser()
+
+		return readCloser, readCloser, nil
+	}},
+}
+
+var chromeAcceptEncoding = func() string {
+	names := make([]string, len(chromeContentEncodings))
+	for index, encoding := range chromeContentEncodings {
+		names[index] = encoding.name
+	}
+
+	return strings.Join(names, ", ")
+}()
+
 func decompressResponse(response *http.Response) {
 	if response == nil || response.Body == nil {
 		return
 	}
-	var decompressor io.Reader
-	var extra io.Closer
-	switch strings.ToLower(response.Header.Get("Content-Encoding")) {
-	case "gzip":
-		reader, err := gzip.NewReader(response.Body)
-		if err != nil {
-			return
-		}
-		decompressor, extra = reader, reader
-	case "deflate":
-		reader := flate.NewReader(response.Body)
-		decompressor, extra = reader, reader
-	case "br":
-		decompressor = brotli.NewReader(response.Body)
-	case "zstd":
-		reader, err := zstd.NewReader(response.Body)
-		if err != nil {
-			return
-		}
-		readCloser := reader.IOReadCloser()
-		decompressor, extra = readCloser, readCloser
-	default:
+	name := strings.ToLower(response.Header.Get("Content-Encoding"))
+	index := slices.IndexFunc(chromeContentEncodings, func(encoding contentEncoding) bool {
+		return encoding.name == name
+	})
+	if index < 0 {
 		return
 	}
+	decompressor, extra, err := chromeContentEncodings[index].newReader(response.Body)
+	if err != nil {
+		return
+	}
+
 	response.Body = &wrappedBody{decompressor: decompressor, source: response.Body, extra: extra}
 	response.Header.Del("Content-Encoding")
 	response.Header.Del("Content-Length")
