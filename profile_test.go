@@ -13,17 +13,27 @@ import (
 
 var userAgentChromeVersion = regexp.MustCompile(`Chrome/(\d+)\.`)
 
-func TestProfileClientHelloIDMatchesUserAgent(t *testing.T) {
+const (
+	measuredChromeVersion  = "151"
+	patchedClientHelloBase = "133"
+)
+
+func TestProfileClaimsTheMeasuredChromeVersion(t *testing.T) {
 	match := userAgentChromeVersion.FindStringSubmatch(ChromeWindows.UserAgent())
 	if match == nil {
 		t.Fatalf("user agent has no Chrome version: %q", ChromeWindows.UserAgent())
 	}
+	if match[1] != measuredChromeVersion {
+		t.Fatalf("user agent says Chrome %q, the measured reference browser is %q", match[1], measuredChromeVersion)
+	}
+
 	clientHelloID := ChromeWindows.ClientHelloID()
 	if clientHelloID.Client != "Chrome" {
 		t.Fatalf("client hello client = %q, want Chrome", clientHelloID.Client)
 	}
-	if clientHelloID.Version != match[1] {
-		t.Fatalf("client hello version = %q, user agent says %q", clientHelloID.Version, match[1])
+	if clientHelloID.Version != patchedClientHelloBase {
+		t.Fatalf("client hello base = %q, want %q; utls has no %s parrot, so the base is patched forward by applyChromeSignatureAlgorithms",
+			clientHelloID.Version, patchedClientHelloBase, measuredChromeVersion)
 	}
 }
 
