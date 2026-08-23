@@ -99,7 +99,9 @@ func (p Profile) clientHelloSpec(alpnOverride []string) (*utls.ClientHelloSpec, 
 	if err != nil {
 		return nil, err
 	}
-	applyChromeSignatureAlgorithms(&spec)
+	if p.ClientHelloID().Client == utls.HelloChrome_Auto.Client {
+		applyChromeSignatureAlgorithms(&spec)
+	}
 	if alpnOverride == nil {
 		return &spec, nil
 	}
