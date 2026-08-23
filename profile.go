@@ -4,19 +4,21 @@ import (
 	utls "github.com/refraction-networking/utls"
 )
 
+const measuredChromeVersion = "151"
+
 type Profile struct {
-	name              string
-	userAgent         string
-	acceptLanguage    string
-	clientHelloID     utls.ClientHelloID
-	dtlsShuffle       bool
-	dtlsGREASE        bool
-	dtlsMimicChrome13 bool
+	name           string
+	userAgent      string
+	acceptLanguage string
+	clientHelloID  utls.ClientHelloID
+	dtlsShuffle    bool
+	dtlsGREASE     bool
+	dtls13Mimic    bool
 }
 
 var ChromeWindows = Profile{
 	name:           "ChromeWindows",
-	userAgent:      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+	userAgent:      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + measuredChromeVersion + ".0.0.0 Safari/537.36",
 	acceptLanguage: "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 	clientHelloID:  utls.HelloChrome_133,
 	dtlsShuffle:    true,
@@ -54,9 +56,9 @@ func (p Profile) WithClientHelloID(clientHelloID utls.ClientHelloID) Profile {
 	return p
 }
 
-func (p Profile) WithDTLSMimicChrome13() Profile {
+func (p Profile) WithDTLS13Mimicry() Profile {
 	p.dtlsShuffle = false
 	p.dtlsGREASE = false
-	p.dtlsMimicChrome13 = true
+	p.dtls13Mimic = true
 	return p
 }

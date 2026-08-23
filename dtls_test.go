@@ -135,14 +135,14 @@ func findSignatureAlgorithms(extensions []extension.Value) *extension.SignatureA
 	return nil
 }
 
-func TestDTLSMimicChrome13(t *testing.T) {
-	output, ok := ChromeWindows.WithDTLSMimicChrome13().dtlsMimicChrome13Hook(pion13ClientHello()).(*handshake.MessageClientHello)
+func TestDTLS13Mimicry(t *testing.T) {
+	output, ok := ChromeWindows.WithDTLS13Mimicry().dtls13MimicHook(pion13ClientHello()).(*handshake.MessageClientHello)
 	if !ok {
 		t.Fatal("mimic hook did not return a client hello")
 	}
 
-	if fmt.Sprint(output.CipherSuiteIDs) != fmt.Sprint(chrome13CipherSuiteIDs) {
-		t.Fatalf("ciphers = %v, want %v", output.CipherSuiteIDs, chrome13CipherSuiteIDs)
+	if fmt.Sprint(output.CipherSuiteIDs) != fmt.Sprint(chromeDTLS13CipherSuiteIDs) {
+		t.Fatalf("ciphers = %v, want %v", output.CipherSuiteIDs, chromeDTLS13CipherSuiteIDs)
 	}
 
 	wantOrder := []extension.Type{65281, 43, 45, 10, 51, 11, 13, 23, 14}
@@ -164,16 +164,16 @@ func TestDTLSMimicChrome13(t *testing.T) {
 	if sigAlgs == nil {
 		t.Fatal("signature_algorithms missing after mimic")
 	}
-	if fmt.Sprint(sigAlgs.Schemes) != fmt.Sprint(chrome13SignatureAlgorithms) {
-		t.Fatalf("signature_algorithms = %v, want %v", sigAlgs.Schemes, chrome13SignatureAlgorithms)
+	if fmt.Sprint(sigAlgs.Schemes) != fmt.Sprint(chromeDTLS13SignatureAlgorithms) {
+		t.Fatalf("signature_algorithms = %v, want %v", sigAlgs.Schemes, chromeDTLS13SignatureAlgorithms)
 	}
 
 	srtpOffer := findSRTPOffer(output.Extensions)
 	if srtpOffer == nil {
 		t.Fatal("use_srtp missing after mimic")
 	}
-	if fmt.Sprint(srtpOffer.ProtectionProfiles) != fmt.Sprint(chrome13SRTPProtectionProfiles) {
-		t.Fatalf("use_srtp = %v, want %v", srtpOffer.ProtectionProfiles, chrome13SRTPProtectionProfiles)
+	if fmt.Sprint(srtpOffer.ProtectionProfiles) != fmt.Sprint(chromeSRTPProtectionProfiles) {
+		t.Fatalf("use_srtp = %v, want %v", srtpOffer.ProtectionProfiles, chromeSRTPProtectionProfiles)
 	}
 
 	if _, err := output.Marshal(); err != nil {
@@ -253,8 +253,8 @@ func TestDTLSServerHelloKeepsUnknownExtensions(t *testing.T) {
 }
 
 func TestChromeSRTPProfileOrderSelectsSHA1OverGCM(t *testing.T) {
-	if chrome13SRTPProtectionProfiles[0] != extension.SRTP_AES128_CM_HMAC_SHA1_80 {
-		t.Fatalf("first profile = %v, chrome offers SRTP_AES128_CM_HMAC_SHA1_80 first", chrome13SRTPProtectionProfiles[0])
+	if chromeSRTPProtectionProfiles[0] != extension.SRTP_AES128_CM_HMAC_SHA1_80 {
+		t.Fatalf("first profile = %v, chrome offers SRTP_AES128_CM_HMAC_SHA1_80 first", chromeSRTPProtectionProfiles[0])
 	}
 
 	peerOffer := []extension.SRTPProtectionProfile{
@@ -263,7 +263,7 @@ func TestChromeSRTPProfileOrderSelectsSHA1OverGCM(t *testing.T) {
 		extension.SRTP_AES128_CM_HMAC_SHA1_80,
 	}
 	var selected extension.SRTPProtectionProfile
-	for _, candidate := range chrome13SRTPProtectionProfiles {
+	for _, candidate := range chromeSRTPProtectionProfiles {
 		if slices.Contains(peerOffer, candidate) {
 			selected = candidate
 

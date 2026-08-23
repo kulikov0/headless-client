@@ -20,22 +20,22 @@ const (
 	x25519Group         = 0x001d
 )
 
-var chrome13CipherSuiteIDs = []uint16{
+var chromeDTLS13CipherSuiteIDs = []uint16{
 	4865, 4866, 4867, 49195, 49199, 52393, 52392,
 	49161, 49171, 49162, 49172, 156, 47, 53,
 }
 
-var chrome13SignatureAlgorithms = []uint16{
+var chromeDTLS13SignatureAlgorithms = []uint16{
 	0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601, 0x0201,
 }
 
-var chrome13SRTPProtectionProfiles = []extension.SRTPProtectionProfile{
+var chromeSRTPProtectionProfiles = []extension.SRTPProtectionProfile{
 	extension.SRTP_AES128_CM_HMAC_SHA1_80,
 	extension.SRTP_AEAD_AES_256_GCM,
 	extension.SRTP_AEAD_AES_128_GCM,
 }
 
-var chrome13ExtensionOrder = []uint16{
+var chromeDTLS13ExtensionOrder = []uint16{
 	65281, 43, 45, 10, 51, 11, 13, 23, 14,
 }
 
@@ -47,10 +47,10 @@ func (p Profile) ApplyWebRTC(settingEngine *webrtc.SettingEngine) {
 	if settingEngine == nil {
 		return
 	}
-	settingEngine.SetSRTPProtectionProfiles(chrome13SRTPProtectionProfiles...)
+	settingEngine.SetSRTPProtectionProfiles(chromeSRTPProtectionProfiles...)
 	settingEngine.SetDTLSServerHelloMessageHook(p.dtlsServerHelloHook)
-	if p.dtlsMimicChrome13 {
-		settingEngine.SetDTLSClientHelloMessageHook(p.dtlsMimicChrome13Hook)
+	if p.dtls13Mimic {
+		settingEngine.SetDTLSClientHelloMessageHook(p.dtls13MimicHook)
 		return
 	}
 	if p.dtlsShuffle || p.dtlsGREASE {
@@ -63,27 +63,33 @@ func (p Profile) dtlsServerHelloHook(serverHello handshake.MessageServerHello) h
 	return &serverHello
 }
 
-func orderExtensions(extensions []extension.Value, canonicalOrder []uint16) []extension.Value {
-	byType := make(map[uint16]extension.Value, len(extensions))
-	for _, ext := range extensions {
-		byType[uint16(ext.ExtensionType())] = ext
+func orderByCanonical[Item any, Key comparable](items []Item, canonicalOrder []Key, keyOf func(Item) Key) []Item {
+	byKey := make(map[Key]Item, len(items))
+	for _, item := range items {
+		byKey[keyOf(item)] = item
 	}
 
-	ordered := make([]extension.Value, 0, len(extensions))
-	placed := make(map[uint16]bool, len(canonicalOrder))
-	for _, extensionType := range canonicalOrder {
-		if ext, ok := byType[extensionType]; ok {
-			ordered = append(ordered, ext)
-			placed[extensionType] = true
+	ordered := make([]Item, 0, len(items))
+	placed := make(map[Key]bool, len(canonicalOrder))
+	for _, key := range canonicalOrder {
+		if item, ok := byKey[key]; ok {
+			ordered = append(ordered, item)
+			placed[key] = true
 		}
 	}
-	for _, ext := range extensions {
-		if !placed[uint16(ext.ExtensionType())] {
-			ordered = append(ordered, ext)
+	for _, item := range items {
+		if !placed[keyOf(item)] {
+			ordered = append(ordered, item)
 		}
 	}
 
 	return ordered
+}
+
+func orderExtensions(extensions []extension.Value, canonicalOrder []uint16) []extension.Value {
+	return orderByCanonical(extensions, canonicalOrder, func(value extension.Value) uint16 {
+		return uint16(value.ExtensionType())
+	})
 }
 
 func (p Profile) dtlsClientHelloHook(clientHello handshake.MessageClientHello) handshake.Message {
@@ -106,7 +112,7 @@ func (p Profile) dtlsClientHelloHook(clientHello handshake.MessageClientHello) h
 	return &clientHello
 }
 
-func (p Profile) dtlsMimicChrome13Hook(clientHello handshake.MessageClientHello) handshake.Message {
+func (p Profile) dtls13MimicHook(clientHello handshake.MessageClientHello) handshake.Message {
 	extensionsByType := make(map[uint16]extension.Value, len(clientHello.Extensions))
 	for _, ext := range clientHello.Extensions {
 		extensionsByType[uint16(ext.ExtensionType())] = ext
@@ -123,7 +129,7 @@ func (p Profile) dtlsMimicChrome13Hook(clientHello handshake.MessageClientHello)
 	}
 
 	if signatureAlgorithms, ok := extensionsByType[13].(*extension.SignatureAlgorithms); ok {
-		signatureAlgorithms.Schemes = append([]uint16(nil), chrome13SignatureAlgorithms...)
+		signatureAlgorithms.Schemes = append([]uint16(nil), chromeDTLS13SignatureAlgorithms...)
 	}
 
 	if srtpOffer, ok := extensionsByType[14].(*extension.SRTPOffer); ok {
@@ -138,30 +144,15 @@ func (p Profile) dtlsMimicChrome13Hook(clientHello handshake.MessageClientHello)
 		})
 	}
 
-	clientHello.Extensions = orderExtensions(present, chrome13ExtensionOrder)
-	clientHello.CipherSuiteIDs = append([]uint16(nil), chrome13CipherSuiteIDs...)
+	clientHello.Extensions = orderExtensions(present, chromeDTLS13ExtensionOrder)
+	clientHello.CipherSuiteIDs = append([]uint16(nil), chromeDTLS13CipherSuiteIDs...)
 	return &clientHello
 }
 
 func reorderSRTPProfiles(current []extension.SRTPProtectionProfile) []extension.SRTPProtectionProfile {
-	present := make(map[extension.SRTPProtectionProfile]bool, len(current))
-	for _, profile := range current {
-		present[profile] = true
-	}
-	reordered := make([]extension.SRTPProtectionProfile, 0, len(current))
-	placed := make(map[extension.SRTPProtectionProfile]bool, len(chrome13SRTPProtectionProfiles))
-	for _, profile := range chrome13SRTPProtectionProfiles {
-		if present[profile] {
-			reordered = append(reordered, profile)
-			placed[profile] = true
-		}
-	}
-	for _, profile := range current {
-		if !placed[profile] {
-			reordered = append(reordered, profile)
-		}
-	}
-	return reordered
+	return orderByCanonical(current, chromeSRTPProtectionProfiles, func(profile extension.SRTPProtectionProfile) extension.SRTPProtectionProfile {
+		return profile
+	})
 }
 
 func seedFromRandom(random handshake.Random) int64 {

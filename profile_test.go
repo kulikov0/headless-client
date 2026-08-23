@@ -4,36 +4,30 @@ import (
 	"context"
 	"io"
 	"net"
-	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
 )
 
-var userAgentChromeVersion = regexp.MustCompile(`Chrome/(\d+)\.`)
-
-const (
-	measuredChromeVersion  = "151"
-	patchedClientHelloBase = "133"
-)
-
-func TestProfileClaimsTheMeasuredChromeVersion(t *testing.T) {
-	match := userAgentChromeVersion.FindStringSubmatch(ChromeWindows.UserAgent())
-	if match == nil {
-		t.Fatalf("user agent has no Chrome version: %q", ChromeWindows.UserAgent())
-	}
-	if match[1] != measuredChromeVersion {
-		t.Fatalf("user agent says Chrome %q, the measured reference browser is %q", match[1], measuredChromeVersion)
-	}
-
+func TestChromeProfilePatchesAnOlderParrotUpToTheMeasuredVersion(t *testing.T) {
 	clientHelloID := ChromeWindows.ClientHelloID()
-	if clientHelloID.Client != "Chrome" {
-		t.Fatalf("client hello client = %q, want Chrome", clientHelloID.Client)
+	if clientHelloID.Client != utls.HelloChrome_Auto.Client {
+		t.Fatalf("client hello client = %q, want %q", clientHelloID.Client, utls.HelloChrome_Auto.Client)
 	}
-	if clientHelloID.Version != patchedClientHelloBase {
-		t.Fatalf("client hello base = %q, want %q; utls has no %s parrot, so the base is patched forward by applyChromeSignatureAlgorithms",
-			clientHelloID.Version, patchedClientHelloBase, measuredChromeVersion)
+
+	parrotVersion, err := strconv.Atoi(clientHelloID.Version)
+	if err != nil {
+		t.Fatalf("client hello version %q is not a number: %v", clientHelloID.Version, err)
+	}
+	measuredVersion, err := strconv.Atoi(measuredChromeVersion)
+	if err != nil {
+		t.Fatalf("measured chrome version %q is not a number: %v", measuredChromeVersion, err)
+	}
+	if parrotVersion >= measuredVersion {
+		t.Fatalf("utls parrots chrome %d, which is not older than the measured %d; use that parrot directly and drop applyChromeSignatureAlgorithms",
+			parrotVersion, measuredVersion)
 	}
 }
 

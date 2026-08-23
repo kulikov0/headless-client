@@ -16,9 +16,9 @@ import (
 	utls "github.com/refraction-networking/utls"
 )
 
-func specSignatureAlgorithms(t *testing.T, alpnOverride []string) []utls.SignatureScheme {
+func specSignatureAlgorithms(t *testing.T, profile Profile, alpnOverride []string) []utls.SignatureScheme {
 	t.Helper()
-	spec, err := ChromeWindows.clientHelloSpec(alpnOverride)
+	spec, err := profile.clientHelloSpec(alpnOverride)
 	if err != nil {
 		t.Fatalf("clientHelloSpec: %v", err)
 	}
@@ -46,9 +46,18 @@ func TestSignatureAlgorithmsMatchTheChromeCapture(t *testing.T) {
 	}
 
 	for _, alpnOverride := range [][]string{nil, {"http/1.1"}} {
-		got := specSignatureAlgorithms(t, alpnOverride)
+		got := specSignatureAlgorithms(t, ChromeWindows, alpnOverride)
 		if !slices.Equal(got, captured) {
 			t.Fatalf("alpnOverride=%v signature algorithms = %v, chrome sends %v", alpnOverride, got, captured)
+		}
+	}
+}
+
+func TestNonChromeParrotKeepsItsOwnSignatureAlgorithms(t *testing.T) {
+	firefox := ChromeWindows.WithClientHelloID(utls.HelloFirefox_120)
+	for _, algorithm := range specSignatureAlgorithms(t, firefox, nil) {
+		if slices.Contains(chromePostQuantumSignatureAlgorithms, algorithm) {
+			t.Fatalf("firefox parrot carries the chrome signature algorithm %#04x", algorithm)
 		}
 	}
 }
@@ -60,7 +69,7 @@ func TestSignatureAlgorithmsAreNotDuplicated(t *testing.T) {
 	}
 	applyChromeSignatureAlgorithms(spec)
 
-	got := specSignatureAlgorithms(t, nil)
+	got := specSignatureAlgorithms(t, ChromeWindows, nil)
 	for _, algorithm := range chromePostQuantumSignatureAlgorithms {
 		if slices.Contains(got[3:], algorithm) {
 			t.Fatalf("%#04x appears twice after a second apply", algorithm)
