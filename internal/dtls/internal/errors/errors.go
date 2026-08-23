@@ -260,6 +260,7 @@ var (
 	ErrMissingPSKKeyExchangeModesExtension = stderrors.New(
 		"pre_shared_key requires psk_key_exchange_modes",
 	)
+	ErrMissingConnectionIDExtension   = stderrors.New("rrc requires connection_id")
 	ErrEarlyDataWithoutPreSharedKey   = stderrors.New("early_data requires pre_shared_key")
 	ErrKeyShareWithoutSupportedGroups = stderrors.New(
 		"key_share requires supported_groups",
@@ -288,6 +289,7 @@ var (
 	ErrInvalidEpoch               = stderrors.New("invalid epoch")
 	ErrCIDTooBig                  = stderrors.New("connection ID size is too big")
 	ErrInvalidUnifiedHeaderFormat = stderrors.New("invalid dtls 1.3 unified header format")
+	ErrAntiAmplificationLimit     = stderrors.New("return routability check anti-amplification limit exceeded")
 
 	ErrCipherSuiteNotInit                        = stderrors.New("CipherSuite has not been initialized")
 	ErrCipherSuiteRecordProtectionNotImplemented = stderrors.New(

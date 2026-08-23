@@ -4,9 +4,16 @@
 package dtls
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
+	"net"
 
+	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
@@ -35,12 +42,125 @@ func OnlySendCIDGenerator() func() []byte {
 	}
 }
 
+type returnRoutabilityConn struct {
+	conn *Conn
+}
+
+func (c returnRoutabilityConn) WriteRRC(
+	ctx context.Context,
+	addr net.Addr,
+	messageType protocol.ReturnRoutabilityCheckMessageType,
+	cookie [protocol.ReturnRoutabilityCheckCookieLength]byte,
+) error {
+	c.conn.writeLock.Lock()
+	defer c.conn.writeLock.Unlock()
+
+	c.conn.lock.Lock()
+	common := dtlsstate.CommonState(c.conn.state)
+	if !common.RRCNegotiated {
+		c.conn.lock.Unlock()
+
+		return dtlserrors.ErrUnexpectedPostHandshakeMessage
+	}
+	packet := &dtlsflight.Packet{
+		Record: &recordlayer.RecordLayer{
+			Header: recordlayer.Header{Version: protocol.Version1_2, Epoch: common.LocalEpoch()},
+			Content: &protocol.ReturnRoutabilityCheck{
+				MessageType: messageType,
+				Cookie:      cookie,
+			},
+		},
+		ShouldWrapCID: common.LocalVersion.Equal(protocol.Version1_2) && c.conn.state.ShouldWrapConnectionID(),
+		ShouldEncrypt: true,
+	}
+	raw, err := c.conn.processPacket(packet)
+	if err == nil {
+		err = c.conn.rrc.Reserve(addr, c.conn.rAddr, len(raw))
+	}
+	c.conn.lock.Unlock()
+	if err != nil {
+		return err
+	}
+
+	if _, err = c.conn.nextConn.WriteToContext(ctx, raw, addr); err != nil {
+		if errors.Is(err, context.Canceled) && c.conn.isConnectionClosed() {
+			return ErrConnClosed
+		}
+
+		return netError(err)
+	}
+
+	return nil
+}
+
+func (c returnRoutabilityConn) HandleRecord(
+	ctx context.Context,
+	message *protocol.ReturnRoutabilityCheck,
+	prepared incomingPacketState,
+	addr net.Addr,
+) (bool, packetOutcome, error) {
+	if prepared.header.Epoch == 0 || !dtlsstate.CommonState(c.conn.state).RRCNegotiated {
+		return false, packetOutcome{
+			responseAlert: &alert.Alert{Level: alert.Fatal, Description: alert.UnexpectedMessage},
+		}, dtlserrors.ErrUnexpectedPostHandshakeMessage
+	}
+	isLatestSeqNum := prepared.markPacketAsValid()
+	var err error
+	switch message.MessageType {
+	case protocol.ReturnRoutabilityCheckPathChallenge:
+		err = c.WriteRRC(ctx, addr, protocol.ReturnRoutabilityCheckPathResponse, message.Cookie)
+	case protocol.ReturnRoutabilityCheckPathResponse:
+		if c.conn.rrc.HandleResponse(addr, message.Cookie) {
+			c.conn.lock.Lock()
+			c.conn.rAddr = addr
+			c.conn.lock.Unlock()
+		}
+		isLatestSeqNum = false
+	case protocol.ReturnRoutabilityCheckPathDrop:
+		isLatestSeqNum = false
+	default:
+		// In addition, implementations MUST be able to parse and gracefully
+		// ignore messages with an unknown msg_type.
+		// https://datatracker.ietf.org/doc/html/rfc9853#section-4
+		isLatestSeqNum = false
+	}
+	if err != nil {
+		c.conn.log.Debugf("unable to handle return routability message: %v", err)
+	}
+
+	return isLatestSeqNum, packetOutcome{}, nil
+}
+
+func (c returnRoutabilityConn) HandleCandidate(
+	ctx context.Context,
+	enabled, hasCID, latest bool,
+	addr net.Addr,
+) {
+	cookie, ok, err := c.conn.rrc.Start(enabled && hasCID && latest, addr, c.conn.RemoteAddr())
+	if err == nil && ok {
+		err = c.WriteRRC(ctx, addr, protocol.ReturnRoutabilityCheckPathChallenge, cookie)
+		if err != nil {
+			c.conn.rrc.Cancel(addr, cookie)
+		}
+	}
+	if err != nil {
+		c.conn.log.Debugf("unable to start return routability check: %v", err)
+	}
+}
+
 // cidDatagramRouter extracts connection IDs from incoming datagram payloads and
 // uses them to route to the proper connection.
 // NOTE: properly routing datagrams based on connection IDs requires using
 // constant size connection IDs.
 func cidDatagramRouter(size int) func([]byte) (string, bool) {
 	return func(packet []byte) (string, bool) {
+		if len(packet) == 0 {
+			return "", false
+		}
+		if protocol.IsDTLS13Ciphertext(protocol.ContentType(packet[0])) {
+			return cidDatagramRouter13(packet, size)
+		}
+
 		pkts, err := recordlayer.ContentAwareUnpackDatagram(packet, size)
 		if err != nil || len(pkts) == 0 {
 			return "", false
@@ -63,6 +183,35 @@ func cidDatagramRouter(size int) func([]byte) (string, bool) {
 	}
 }
 
+// cidDatagramRouter13 extracts the fixed-length connection ID from a DTLS 1.3
+// unified header. The CID bit is authenticated only when Conn opens the record,
+// so routing by it selects a candidate connection rather than authenticating a
+// peer address.
+//
+// https://datatracker.ietf.org/doc/html/rfc9147#section-4
+func cidDatagramRouter13(packet []byte, size int) (string, bool) {
+	pkts, err := recordlayer.UnpackDatagram13(packet, size, false, true)
+	if err != nil || len(pkts) == 0 {
+		return "", false
+	}
+	for _, pkt := range pkts {
+		if len(pkt) == 0 ||
+			!protocol.IsDTLS13Ciphertext(protocol.ContentType(pkt[0])) ||
+			pkt[0]&recordlayer.UnifiedHeaderCIDBit == 0 {
+			continue
+		}
+
+		h := recordlayer.UnifiedHeader{ConnectionID: make([]byte, size)}
+		if err := h.Unmarshal(pkt); err != nil {
+			continue
+		}
+
+		return string(h.ConnectionID), true
+	}
+
+	return "", false
+}
+
 // cidConnIdentifier extracts connection IDs from outgoing ServerHello records
 // and associates them with the associated connection.
 // NOTE: a ServerHello should always be the first record in a datagram if
@@ -70,28 +219,25 @@ func cidDatagramRouter(size int) func([]byte) (string, bool) {
 // is not a ServerHello.
 func cidConnIdentifier() func([]byte) (string, bool) { //nolint:cyclop
 	return func(packet []byte) (string, bool) {
-		pkts, err := recordlayer.UnpackDatagram(packet)
-		if err != nil || len(pkts) == 0 {
-			return "", false
-		}
 		var h recordlayer.Header
-		if hErr := h.Unmarshal(pkts[0]); hErr != nil {
+		if err := h.Unmarshal(packet); err != nil {
 			return "", false
 		}
 		if h.ContentType != protocol.ContentTypeHandshake {
 			return "", false
 		}
+		firstRecordSize := h.Size() + int(h.ContentLen)
+		if len(packet) < firstRecordSize {
+			return "", false
+		}
+		firstRecord := packet[:firstRecordSize]
+
 		var hh handshake.Header
 		var sh handshake.MessageServerHello
-		for _, pkt := range pkts {
-			if hhErr := hh.Unmarshal(pkt[recordlayer.FixedHeaderSize:]); hhErr != nil {
-				continue
-			}
-			if err = sh.Unmarshal(pkt[recordlayer.FixedHeaderSize+handshake.HeaderLength:]); err == nil {
-				break
-			}
+		if err := hh.Unmarshal(firstRecord[recordlayer.FixedHeaderSize:]); err != nil {
+			return "", false
 		}
-		if err != nil {
+		if err := sh.Unmarshal(firstRecord[recordlayer.FixedHeaderSize+handshake.HeaderLength:]); err != nil {
 			return "", false
 		}
 		for _, ext := range sh.Extensions {

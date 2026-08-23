@@ -11,8 +11,8 @@ import (
 	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite"
 	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
 	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
 	"github.com/kulikov0/headlessclient/internal/dtls/internal/util"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
@@ -56,6 +56,7 @@ func flight3Parse(
 			return 0, &alert.Alert{Level: alert.Fatal, Description: alert.ProtocolVersion}, dtlserrors.ErrUnsupportedProtocolVersion //nolint:lll
 		}
 		state.Cookie = bytes.Clone(h.Cookie)
+		state.HasHelloVerifyRequest = true
 		state.HandshakeRecvSequence = serverResponsePull.NextSequence
 
 		return Flight3, nil, nil
@@ -63,28 +64,28 @@ func flight3Parse(
 
 	serverResponse = serverResponsePull.Messages[handshake.TypeServerHello]
 	serverHelloMsg, hasServerHello := serverResponse.(*handshake.MessageServerHello)
-	var decision *extensionnegotiation.ConnectionID
-	var srtpDecision extensionnegotiation.SRTPDecision
+	var decision *negotiation.ConnectionID
+	var srtpDecision negotiation.SRTPDecision
 	if hasServerHello { //nolint:nestif
 		if !serverHelloMsg.Version.Equal(protocol.Version1_2) {
 			return 0, &alert.Alert{Level: alert.Fatal, Description: alert.ProtocolVersion},
 				dtlserrors.ErrUnsupportedProtocolVersion
 		}
 		offer := state.LocalClientHelloSnapshots.Current()
-		if validationErr := extensionnegotiation.ValidateServerHello12Context(serverHelloMsg); validationErr != nil {
+		if validationErr := negotiation.ValidateServerHello12Context(serverHelloMsg); validationErr != nil {
 			return 0, &alert.Alert{Level: alert.Fatal, Description: alert.IllegalParameter}, validationErr
 		}
-		if validationErr := extensionnegotiation.ValidateServerHelloResponse(offer, serverHelloMsg); validationErr != nil {
+		if validationErr := negotiation.ValidateServerHelloResponse(offer, serverHelloMsg); validationErr != nil {
 			return 0, &alert.Alert{Level: alert.Fatal, Description: alert.UnsupportedExtension}, validationErr
 		}
-		if srtpDecision, err = extensionnegotiation.ValidateSRTPSelection(
+		if srtpDecision, err = negotiation.ValidateSRTPSelection(
 			offer,
 			serverHelloMsg.Extensions,
 			cfg.LocalSRTPProtectionProfiles,
 		); err != nil {
 			return 0, nil, err
 		}
-		decision = extensionnegotiation.DecideConnectionID(offer, serverHelloMsg.Extensions)
+		decision = negotiation.DecideConnectionID(offer, serverHelloMsg.Extensions)
 		if decision == nil {
 			state.CommitNegotiatedExtensions(nil)
 		}
@@ -372,9 +373,12 @@ func flight3Generate(
 
 	// If the generated first ClientHello offered a connection ID, use the
 	// exact post-hook value as the default in the second ClientHello.
-	cid, cidOffered := extensionnegotiation.ConnectionIDOffer(state.LocalClientHelloSnapshots.Initial())
+	cid, cidOffered := negotiation.ConnectionIDOffer(state.LocalClientHelloSnapshots.Initial())
 	if cfg.ConnectionIDGenerator != nil && cidOffered {
 		extensions = append(extensions, &extension.ConnectionID{CID: cid})
+		if state.LocalClientHelloSnapshots.Initial().Offered(extension.TypeReturnRoutabilityCheck) {
+			extensions = append(extensions, &extension.ReturnRoutabilityCheck{})
+		}
 	}
 
 	clientHello := &handshake.MessageClientHello{
@@ -386,10 +390,27 @@ func flight3Generate(
 		CompressionMethods: dtlsflight.DefaultCompressionMethods(),
 		Extensions:         extensions,
 	}
+	if state.HasHelloVerifyRequest {
+		retry, err := negotiation.ClientHelloFromSnapshot(
+			state.LocalClientHelloSnapshots.Initial(),
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		retry.Cookie = state.Cookie
+		clientHello = retry
+	}
 
-	clientHello, snapshot, err := extensionnegotiation.FinalizeClientHello(clientHello, cfg.ClientHelloMessageHook)
+	clientHello, snapshot, err := negotiation.FinalizeClientHello(clientHello, cfg.ClientHelloMessageHook)
 	if err != nil {
 		return nil, nil, err
+	}
+	if state.HasHelloVerifyRequest {
+		if err := negotiation.ValidateHelloVerifyRequestResponse(
+			state.LocalClientHelloSnapshots.Initial(), snapshot, state.Cookie,
+		); err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := state.RecordLocalClientHello(snapshot); err != nil {
 		return nil, nil, err

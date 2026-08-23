@@ -10,8 +10,8 @@ import (
 
 	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
 	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
@@ -43,6 +43,7 @@ func flight1Generate(
 	}
 	state.SelectedGroup = cfg.EllipticCurves[0]
 	state.Cookie = nil
+	state.HelloRetryRequest = negotiation.RetryRequest{}
 
 	if err := state.LocalRandom.Populate(); err != nil {
 		return nil, nil, err
@@ -134,6 +135,7 @@ func flight1Generate(
 		extensions = append(extensions, &extension.ConnectionID{
 			CID: bytes.Clone(cfg.ConnectionIDGenerator()),
 		})
+		extensions = append(extensions, &extension.ReturnRoutabilityCheck{})
 	}
 
 	// Pre_shared_key must be last extension
@@ -149,7 +151,7 @@ func flight1Generate(
 		Extensions:         extensions,
 	}
 
-	clientHello, snapshot, err := extensionnegotiation.FinalizeClientHello(clientHello, cfg.ClientHelloMessageHook)
+	clientHello, snapshot, err := negotiation.FinalizeClientHello(clientHello, cfg.ClientHelloMessageHook)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -226,7 +228,7 @@ func flight1Parse(
 
 		return 0, &alert.Alert{Level: alert.Fatal, Description: description}, err
 	}
-	if err := extensionnegotiation.ValidateServerHelloResponse(
+	if err := negotiation.ValidateServerHelloResponse(
 		state.LocalClientHelloSnapshots.Current(), sh,
 	); err != nil {
 		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.UnsupportedExtension}, err
@@ -235,27 +237,15 @@ func flight1Parse(
 	if err != nil {
 		return 0, dtlsAlert, err
 	}
-	state.CipherSuite = selectedCipherSuite
-
-	// nolint:godox
-	// TODO: negotiate minimial set of extensions necessary for the client
-	// to generate a correct CH pair. As with the ServerHello, a
-	// HelloRetryRequest MUST NOT contain any extensions that were not first
-	// offered by the client in its ClientHello, with the exception of
-	// optionally the "cookie" extension
-	for _, val := range sh.Extensions {
-		switch ext := val.(type) {
-		case *extension13.SelectedVersion:
-			// nolint:godox
-			// TODO: negotiate version
-			state.RemoteVersions = []protocol.Version{ext.Version}
-		case *extension13.Cookie:
-			state.Cookie = bytes.Clone(ext.Cookie)
-		case *extension13.RetryKeyShare:
-			state.RemoteKeyEntries = []extension13.KeyShareEntry{{Group: ext.SelectedGroup}}
-			state.HasRemoteKeyEntries = true
-		}
+	retryRequest, err := negotiation.ValidateHelloRetryRequest(
+		state.LocalClientHelloSnapshots.Initial(), sh,
+	)
+	if err != nil {
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.IllegalParameter}, err
 	}
+	state.CipherSuite = selectedCipherSuite
+	state.HelloRetryRequest = retryRequest
+	state.RemoteVersions = []protocol.Version{protocol.Version1_3}
 
 	if flightCtx.inboundHandshakeHandler != nil {
 		if err := flightCtx.inboundHandshakeHandler(state.CipherSuite, pull.Items); err != nil {

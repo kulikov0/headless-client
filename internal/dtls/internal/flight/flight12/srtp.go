@@ -8,18 +8,18 @@ import (
 	"fmt"
 
 	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
 )
 
 func validateServerSRTP(
-	snapshot extensionnegotiation.ClientHelloSnapshot,
+	snapshot negotiation.ClientHelloSnapshot,
 	responses []extension.Value,
 	localProfiles []extension.SRTPProtectionProfile,
-	want extensionnegotiation.SRTPDecision,
+	want negotiation.SRTPDecision,
 ) error {
-	got, err := extensionnegotiation.ValidateSRTPSelection(snapshot, responses, localProfiles)
+	got, err := negotiation.ValidateSRTPSelection(snapshot, responses, localProfiles)
 	if err != nil {
 		return err
 	}
@@ -33,7 +33,7 @@ func validateServerSRTP(
 
 func appendSRTPSelection(
 	extensions []extension.Value,
-	decision extensionnegotiation.SRTPDecision,
+	decision negotiation.SRTPDecision,
 ) []extension.Value {
 	if decision.ProtectionProfile == 0 {
 		return extensions

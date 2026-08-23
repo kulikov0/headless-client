@@ -17,12 +17,13 @@ import (
 	"github.com/kulikov0/headlessclient/internal/dtls/internal/closer"
 	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
 	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
 	dtlsflight12 "github.com/kulikov0/headlessclient/internal/dtls/internal/flight/flight12"
 	dtlsflight13 "github.com/kulikov0/headlessclient/internal/dtls/internal/flight/flight13"
 	dtlsfragmentbuffer "github.com/kulikov0/headlessclient/internal/dtls/internal/fragmentbuffer"
 	dtlshandshake "github.com/kulikov0/headlessclient/internal/dtls/internal/handshake"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
+	dtlsrrc "github.com/kulikov0/headlessclient/internal/dtls/internal/rrc"
 	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
 	"github.com/kulikov0/headlessclient/internal/dtls/internal/util"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
@@ -226,6 +227,8 @@ type Conn struct {
 	replayProtectionWindow uint
 
 	handshakeConfig *dtlsconfig.HandshakeConfig
+
+	rrc dtlsrrc.Manager
 }
 
 // createConn creates a new DTLS connection.
@@ -1045,7 +1048,8 @@ func (c *Conn) processProtectedPacket(pkt *dtlsflight.Packet, seq uint64) ([]byt
 
 func marshalRecordContent(content protocol.Content) (protocol.ContentType, []byte, error) {
 	switch content.(type) {
-	case *handshake.Handshake, *alert.Alert, *protocol.ApplicationData, *protocol.ACK:
+	case *handshake.Handshake, *alert.Alert, *protocol.ApplicationData, *protocol.ACK,
+		*protocol.ReturnRoutabilityCheck:
 	default:
 		return 0, nil, dtlserrors.ErrCipherSuiteRecordProtectionNotImplemented
 	}
@@ -1610,7 +1614,8 @@ func (c *Conn) openCiphertextWithGeneration(
 	case protocol.ContentTypeAlert,
 		protocol.ContentTypeHandshake,
 		protocol.ContentTypeApplicationData,
-		protocol.ContentTypeACK:
+		protocol.ContentTypeACK,
+		protocol.ContentTypeReturnRoutabilityCheck:
 		return innerPlaintext, sequenceNumber, nil
 	default:
 		return recordlayer.InnerPlaintext{}, 0, dtlserrors.ErrInvalidContentType
@@ -1737,7 +1742,16 @@ func (c *Conn) prepareCiphertextPacket(
 		return incomingPacketState{}, false
 	}
 
-	return c.prepareInnerPlaintextRecord(epoch, sequenceNumber, innerPlaintext, markPacketAsValid)
+	prepared, ok := c.prepareInnerPlaintextRecord(epoch, sequenceNumber, innerPlaintext, markPacketAsValid)
+	if ok {
+		// The datagram's source address remains a candidate until the CID and
+		// ciphertext have both been authenticated and replay checks confirm this
+		// is the latest valid record.
+		// https://datatracker.ietf.org/doc/html/rfc9146#section-6
+		prepared.originalCID = len(ciphertext.Header.ConnectionID) > 0
+	}
+
+	return prepared, ok
 }
 
 func (c *Conn) prepareInnerPlaintextRecord(
@@ -1748,7 +1762,8 @@ func (c *Conn) prepareInnerPlaintextRecord(
 ) (incomingPacketState, bool) {
 	switch innerPlaintext.RealType {
 	case protocol.ContentTypeHandshake, protocol.ContentTypeAlert,
-		protocol.ContentTypeApplicationData, protocol.ContentTypeACK:
+		protocol.ContentTypeApplicationData, protocol.ContentTypeACK,
+		protocol.ContentTypeReturnRoutabilityCheck:
 		plaintext, header, err := marshalInnerPlaintextRecord(remoteEpoch, sequenceNumber, innerPlaintext)
 		if err != nil {
 			c.log.Debugf("converting ciphertext record to inner plaintext failed: %s", err)
@@ -2043,7 +2058,7 @@ func (c *Conn) bufferHandshakeRecord(
 	buf []byte,
 	header *recordlayer.Header,
 	markPacketAsValid func() bool,
-) (packetOutcome, bool) {
+) (packetOutcome, bool, bool) {
 	c.syncFragmentBufferHandshakeSequence()
 	isHandshake, isRetransmit, err := c.fragmentBuffer.Push(bytes.Clone(buf))
 	if err != nil {
@@ -2051,13 +2066,13 @@ func (c *Conn) bufferHandshakeRecord(
 		// [RFC6347 Section-4.1.2.7]
 		c.log.Debugf("defragment failed: %s", err)
 
-		return packetOutcome{}, true
+		return packetOutcome{}, true, false
 	}
 	if !isHandshake {
-		return packetOutcome{}, false
+		return packetOutcome{}, false, false
 	}
 
-	markPacketAsValid()
+	isLatestSeqNum := markPacketAsValid()
 	if dtlsstate.CommonState(c.state).LocalVersion.Equal(protocol.Version1_3) &&
 		header.Epoch >= dtlsflight13.EpochHandshake {
 		c.lock.Lock()
@@ -2077,7 +2092,7 @@ func (c *Conn) bufferHandshakeRecord(
 		c.handshakeCache.Push(out, epoch, header.MessageSequence, header.Type, !dtlsstate.CommonState(c.state).IsClient)
 	}
 
-	return packetOutcome{containsHandshake: true, retransmit: isRetransmit}, true
+	return packetOutcome{containsHandshake: true, retransmit: isRetransmit}, true, isLatestSeqNum
 }
 
 func (c *Conn) handleChangeCipherSpecRecord(
@@ -2137,9 +2152,9 @@ func (c *Conn) handleRecordContent(
 ) (bool, packetOutcome, error) {
 	switch content := content.(type) {
 	case *protocol.ACK:
-		prepared.markPacketAsValid()
+		isLatestSeqNum := prepared.markPacketAsValid()
 
-		return false, packetOutcome{
+		return isLatestSeqNum, packetOutcome{
 			receivedACK: &protocol.ACK{Records: append([]protocol.RecordNumber(nil), content.Records...)},
 		}, nil
 	case *alert.Alert:
@@ -2156,6 +2171,8 @@ func (c *Conn) handleRecordContent(
 		return c.handleChangeCipherSpecRecord(prepared, rAddr, bufferLease), packetOutcome{}, nil
 	case *protocol.ApplicationData:
 		return c.handleApplicationDataRecord(ctx, content, prepared)
+	case *protocol.ReturnRoutabilityCheck:
+		return returnRoutabilityConn{conn: c}.HandleRecord(ctx, content, prepared, rAddr)
 	default:
 		return false, packetOutcome{
 			responseAlert: &alert.Alert{Level: alert.Fatal, Description: alert.UnexpectedMessage},
@@ -2177,11 +2194,26 @@ func (c *Conn) handleIncomingPacket(
 	if !ok {
 		return packetOutcome{}, nil
 	}
-	if outcome, handled := c.bufferHandshakeRecord(
+	prepared.markPacketAsValid = c.rrc.WrapReplayMarker(
+		prepared.markPacketAsValid,
+		rAddr,
+		len(buf),
+		c.RemoteAddr,
+		dtlsstate.CommonState(c.state).RRCNegotiated,
+	)
+	if outcome, handled, isLatestSeqNum := c.bufferHandshakeRecord(
 		prepared.buf,
 		prepared.header,
 		prepared.markPacketAsValid,
 	); handled {
+		returnRoutabilityConn{conn: c}.HandleCandidate(
+			ctx,
+			dtlsstate.CommonState(c.state).RRCNegotiated,
+			prepared.originalCID,
+			isLatestSeqNum,
+			rAddr,
+		)
+
 		return outcome, nil
 	}
 
@@ -2197,14 +2229,13 @@ func (c *Conn) handleIncomingPacket(
 		return outcome, err
 	}
 
-	// Any valid connection ID record is a candidate for updating the remote
-	// address if it is the latest record received.
-	// https://datatracker.ietf.org/doc/html/rfc9146#peer-address-update
-	if prepared.originalCID && isLatestSeqNum && rAddr != c.RemoteAddr() {
-		c.lock.Lock()
-		c.rAddr = rAddr
-		c.lock.Unlock()
-	}
+	returnRoutabilityConn{conn: c}.HandleCandidate(
+		ctx,
+		dtlsstate.CommonState(c.state).RRCNegotiated,
+		prepared.originalCID,
+		isLatestSeqNum,
+		rAddr,
+	)
 
 	return outcome, nil
 }
@@ -2439,7 +2470,7 @@ func (c *Conn) pickVersionFromServerResponse() (bool, error) {
 
 func (c *Conn) pickVersionFromServerHello(sh *handshake.MessageServerHello) error {
 	common := dtlsstate.CommonState(c.state)
-	if err := extensionnegotiation.ValidateServerHelloResponse(
+	if err := negotiation.ValidateServerHelloResponse(
 		common.LocalClientHelloSnapshots.Current(),
 		sh,
 	); err != nil {

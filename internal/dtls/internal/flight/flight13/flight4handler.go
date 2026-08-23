@@ -12,8 +12,8 @@ import (
 	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite"
 	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
 	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/prf"
@@ -63,16 +63,6 @@ func flight4Parse(
 
 	// Returning the current flight marks the server's last receive flight.
 	return Flight4, nil, nil
-}
-
-func clientHelloCookie(extensions []extension.Value) []byte {
-	for _, ext := range extensions {
-		if cookieExt, ok := ext.(*extension13.Cookie); ok {
-			return cookieExt.Cookie
-		}
-	}
-
-	return nil
 }
 
 func selectClientKeyShare(
@@ -237,7 +227,7 @@ func flight4Generate( //nolint:cyclop
 		},
 	})
 	offer := state.RemoteClientHelloSnapshots.Current()
-	srtpDecision, err := extensionnegotiation.NegotiateSRTP(
+	srtpDecision, err := negotiation.NegotiateSRTP(
 		offer, cfg.LocalSRTPProtectionProfiles, cfg.LocalSRTPMasterKeyIdentifier,
 	)
 	if err != nil {
@@ -249,6 +239,9 @@ func flight4Generate( //nolint:cyclop
 			localCID = bytes.Clone(cfg.ConnectionIDGenerator())
 		}
 		serverHelloExtensions = append(serverHelloExtensions, &extension.ConnectionID{CID: bytes.Clone(localCID)})
+		if offer.Offered(extension.TypeReturnRoutabilityCheck) {
+			serverHelloExtensions = append(serverHelloExtensions, &extension.ReturnRoutabilityCheck{})
+		}
 	}
 	serverHelloMessage := &handshake.MessageServerHello{
 		Version:           protocol.Version1_2,
@@ -260,7 +253,7 @@ func flight4Generate( //nolint:cyclop
 	if _, err = serverHelloMessage.Marshal(); err != nil {
 		return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 	}
-	decision := extensionnegotiation.DecideConnectionID(offer, serverHelloExtensions)
+	decision := negotiation.DecideConnectionID(offer, serverHelloExtensions)
 
 	serverHello := &dtlsflight.Packet{
 		Record: &recordlayer.RecordLayer{

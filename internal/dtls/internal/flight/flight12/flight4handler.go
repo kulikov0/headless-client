@@ -13,9 +13,9 @@ import (
 	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite"
 	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
 	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
 	dtlscrypto "github.com/kulikov0/headlessclient/internal/dtls/internal/handshakecrypto"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
 	"github.com/kulikov0/headlessclient/internal/dtls/internal/util"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/clientcertificate"
@@ -265,7 +265,7 @@ func flight4Generate(
 ) ([]*dtlsflight.Packet, *alert.Alert, error) {
 	offer := state.RemoteClientHelloSnapshots.Current()
 	extensions := []extension.Value{}
-	srtpSelection, err := extensionnegotiation.NegotiateSRTP(
+	srtpSelection, err := negotiation.NegotiateSRTP(
 		offer, cfg.LocalSRTPProtectionProfiles, cfg.LocalSRTPMasterKeyIdentifier,
 	)
 	if err != nil {
@@ -300,6 +300,9 @@ func flight4Generate(
 
 	if cid := serverCIDExtension(state, cfg, offer); cid != nil {
 		extensions = append(extensions, cid)
+		if offer.Offered(extension.TypeReturnRoutabilityCheck) {
+			extensions = append(extensions, &extension.ReturnRoutabilityCheck{})
+		}
 	}
 
 	var pkts []*dtlsflight.Packet
@@ -321,7 +324,7 @@ func flight4Generate(
 		Extensions:        extensions,
 	}
 
-	serverHello, err = extensionnegotiation.FinalizeServerHello(serverHello, cfg.ServerHelloMessageHook, offer)
+	serverHello, err = negotiation.FinalizeServerHello(serverHello, cfg.ServerHelloMessageHook, offer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -330,7 +333,7 @@ func flight4Generate(
 	); err != nil {
 		return nil, nil, err
 	}
-	decision := extensionnegotiation.DecideConnectionID(offer, serverHello.Extensions)
+	decision := negotiation.DecideConnectionID(offer, serverHello.Extensions)
 	content := handshake.Handshake{Message: serverHello}
 
 	pkts = append(pkts, &dtlsflight.Packet{
@@ -493,7 +496,7 @@ func flight4Generate(
 	return pkts, nil, nil
 }
 
-func serverCIDExtension(state *dtlsstate.State12, cfg *dtlsconfig.HandshakeConfig, offer extensionnegotiation.ClientHelloSnapshot) *extension.ConnectionID { //nolint:lll
+func serverCIDExtension(state *dtlsstate.State12, cfg *dtlsconfig.HandshakeConfig, offer negotiation.ClientHelloSnapshot) *extension.ConnectionID { //nolint:lll
 	if cfg.ConnectionIDGenerator == nil || !offer.Offered(extension.TypeConnectionID) {
 		return nil
 	}

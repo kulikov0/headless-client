@@ -6,7 +6,7 @@ package state
 import (
 	"bytes"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/signaturehash"
 	extension13 "github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension/dtls13"
@@ -117,6 +117,7 @@ type State13 struct {
 	RemoteGroups        []elliptic.Curve
 
 	Cookie                []byte
+	HelloRetryRequest     negotiation.RetryRequest
 	HandshakeSendSequence int
 	HandshakeRecvSequence int
 
@@ -138,7 +139,7 @@ func (*State13) ShouldWrapConnectionID() bool {
 func (s *State13) ResetConnectionIDs() { s.CommitNegotiatedExtensions(nil) }
 
 // CommitNegotiatedExtensions applies a fully validated extension decision.
-func (s *State13) CommitNegotiatedExtensions(decision *extensionnegotiation.ConnectionID) {
+func (s *State13) CommitNegotiatedExtensions(decision *negotiation.ConnectionID) {
 	s.Common.CommitNegotiatedExtensions(decision)
 	if decision == nil {
 		s.CID = CIDState{}

@@ -9,8 +9,8 @@ import (
 
 	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
 	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/prf"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
@@ -71,7 +71,7 @@ func flight4bGenerate(
 ) ([]*dtlsflight.Packet, *alert.Alert, error) {
 	var pkts []*dtlsflight.Packet
 	offer := state.RemoteClientHelloSnapshots.Current()
-	srtpSelection, err := extensionnegotiation.NegotiateSRTP(
+	srtpSelection, err := negotiation.NegotiateSRTP(
 		offer, cfg.LocalSRTPProtectionProfiles, cfg.LocalSRTPMasterKeyIdentifier,
 	)
 	if err != nil {
@@ -100,6 +100,9 @@ func flight4bGenerate(
 	}
 	if cid := serverCIDExtension(state, cfg, offer); cid != nil {
 		extensions = append(extensions, cid)
+		if offer.Offered(extension.TypeReturnRoutabilityCheck) {
+			extensions = append(extensions, &extension.ReturnRoutabilityCheck{})
+		}
 	}
 
 	cipherSuiteID := uint16(state.CipherSuite.ID())
@@ -112,7 +115,7 @@ func flight4bGenerate(
 		Extensions:        extensions,
 	}
 
-	serverHelloMessage, err = extensionnegotiation.FinalizeServerHello(serverHelloMessage, cfg.ServerHelloMessageHook, offer) //nolint:lll
+	serverHelloMessage, err = negotiation.FinalizeServerHello(serverHelloMessage, cfg.ServerHelloMessageHook, offer) //nolint:lll
 	if err != nil {
 		return nil, nil, err
 	}
@@ -121,7 +124,7 @@ func flight4bGenerate(
 	); err != nil {
 		return nil, nil, err
 	}
-	decision := extensionnegotiation.DecideConnectionID(offer, serverHelloMessage.Extensions)
+	decision := negotiation.DecideConnectionID(offer, serverHelloMessage.Extensions)
 	serverHello := handshake.Handshake{Message: serverHelloMessage}
 
 	serverHello.Header.MessageSequence = uint16(state.HandshakeSendSequence) //nolint:gosec // G115

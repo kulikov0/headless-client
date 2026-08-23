@@ -10,7 +10,7 @@ import (
 	"slices"
 
 	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/signaturehash"
 )
@@ -26,7 +26,7 @@ func FindMatchingSRTPProfile(a, b []dtlsconfig.SRTPProtectionProfile) (dtlsconfi
 }
 
 // CommitSRTP publishes a validated SRTP decision.
-func CommitSRTP(state *dtlsstate.Common, decision extensionnegotiation.SRTPDecision) {
+func CommitSRTP(state *dtlsstate.Common, decision negotiation.SRTPDecision) {
 	if decision.ProtectionProfile != 0 {
 		state.RemoteSRTPMasterKeyIdentifier = bytes.Clone(decision.PeerMasterKeyIdentifier)
 	}

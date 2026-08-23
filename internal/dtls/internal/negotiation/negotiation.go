@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
-// Package extensionnegotiation finalizes and retains ClientHello offers.
-package extensionnegotiation
+// Package negotiation finalizes ClientHello offers and validates handshake negotiation against them.
+package negotiation
 
 import (
 	"bytes"
@@ -18,8 +18,9 @@ import (
 
 // ClientHelloSnapshot is an immutable copy of a validated ClientHello body.
 type ClientHelloSnapshot struct {
-	body       []byte
-	extensions []extension.Raw
+	body            []byte
+	extensionOffset int
+	extensions      []extension.Raw
 }
 
 // Valid reports whether the snapshot contains a ClientHello.
@@ -138,7 +139,9 @@ func snapshotClientHello(body []byte) (ClientHelloSnapshot, error) {
 		return ClientHelloSnapshot{}, fmt.Errorf("extensions: %w", err)
 	}
 
-	return ClientHelloSnapshot{body: bytes.Clone(body), extensions: extensions}, nil
+	return ClientHelloSnapshot{
+		body: bytes.Clone(body), extensionOffset: len(body) - len(extensionData), extensions: extensions,
+	}, nil
 }
 
 func clientHelloExtensions(body []byte) ([]byte, error) {
@@ -272,7 +275,8 @@ func ConnectionIDOffer(snapshot ClientHelloSnapshot) ([]byte, bool) {
 
 // ConnectionID is the session-wide CID negotiation decision.
 type ConnectionID struct {
-	ClientCID, ServerCID []byte
+	ClientCID, ServerCID   []byte
+	ReturnRoutabilityCheck bool
 }
 
 // DecideConnectionID derives a CID decision from an offer and final response.
@@ -281,7 +285,14 @@ func DecideConnectionID(offer ClientHelloSnapshot, responses []extension.Value) 
 	if offered {
 		for _, value := range responses {
 			if response, ok := value.(*extension.ConnectionID); ok && response != nil {
-				return &ConnectionID{ClientCID: clientCID, ServerCID: bytes.Clone(response.CID)}
+				return &ConnectionID{
+					ClientCID: clientCID,
+					ServerCID: bytes.Clone(response.CID),
+					ReturnRoutabilityCheck: offer.Offered(extension.TypeReturnRoutabilityCheck) &&
+						slices.ContainsFunc(responses, func(value extension.Value) bool {
+							return value.ExtensionType() == extension.TypeReturnRoutabilityCheck
+						}),
+				}
 			}
 		}
 	}
@@ -345,8 +356,4 @@ func invalidHook(kind error, message handshake.Message, err error) error {
 	}
 
 	return negotiationError(kind, err, alert.InternalError)
-}
-
-func negotiationError(kind, err error, description alert.Description) error {
-	return fmt.Errorf("%w: %w: %w", kind, err, &alert.Alert{Level: alert.Fatal, Description: description})
 }

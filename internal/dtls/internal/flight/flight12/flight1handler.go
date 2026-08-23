@@ -9,8 +9,8 @@ import (
 
 	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
 	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
@@ -56,6 +56,7 @@ func flight1Parse(
 				dtlserrors.ErrUnsupportedProtocolVersion
 		}
 		state.Cookie = bytes.Clone(h.Cookie)
+		state.HasHelloVerifyRequest = true
 		state.HandshakeRecvSequence = pull.NextSequence
 
 		return Flight3, nil, nil
@@ -84,6 +85,7 @@ func flight1Generate(
 	}
 	state.NamedCurve = ellipticCurves[0]
 	state.Cookie = nil
+	state.HasHelloVerifyRequest = false
 
 	if err := state.LocalRandom.Populate(); err != nil {
 		return nil, nil, err
@@ -164,6 +166,7 @@ func flight1Generate(
 	// use.
 	if cfg.ConnectionIDGenerator != nil {
 		extensions = append(extensions, &extension.ConnectionID{CID: cfg.ConnectionIDGenerator()})
+		extensions = append(extensions, &extension.ReturnRoutabilityCheck{})
 	}
 
 	clientHello := &handshake.MessageClientHello{
@@ -176,7 +179,7 @@ func flight1Generate(
 		Extensions:         extensions,
 	}
 
-	clientHello, snapshot, err := extensionnegotiation.FinalizeClientHello(clientHello, cfg.ClientHelloMessageHook)
+	clientHello, snapshot, err := negotiation.FinalizeClientHello(clientHello, cfg.ClientHelloMessageHook)
 	if err != nil {
 		return nil, nil, err
 	}

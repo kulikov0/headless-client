@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/extensionnegotiation"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
@@ -52,6 +52,9 @@ type Common struct {
 	// RemoteCIDOffered reports whether the peer sent a connection_id
 	// extension.
 	RemoteCIDOffered bool
+	// RRCNegotiated reports whether both peers exchanged the RFC 9853
+	// extension. The negotiation is shared by DTLS 1.2 and DTLS 1.3.
+	RRCNegotiated bool
 	// pendingLocalConnectionID is the uncommitted CID offered by this client.
 	pendingLocalConnectionID atomic.Pointer[[]byte]
 
@@ -70,8 +73,8 @@ type Common struct {
 
 	// ClientHello snapshots are transient negotiation state.
 	// they aren't serialized with resumable connection state.
-	LocalClientHelloSnapshots  extensionnegotiation.ClientHelloSnapshots
-	RemoteClientHelloSnapshots extensionnegotiation.ClientHelloSnapshots
+	LocalClientHelloSnapshots  negotiation.ClientHelloSnapshots
+	RemoteClientHelloSnapshots negotiation.ClientHelloSnapshots
 }
 
 func (s *Common) RemoteEpoch() uint16 {
@@ -111,11 +114,11 @@ func (s *Common) SetLocalConnectionID(v []byte) {
 }
 
 // RecordLocalClientHello retains an offer and publishes its pending CID.
-func (s *Common) RecordLocalClientHello(snapshot extensionnegotiation.ClientHelloSnapshot) error {
+func (s *Common) RecordLocalClientHello(snapshot negotiation.ClientHelloSnapshot) error {
 	if err := s.LocalClientHelloSnapshots.Record(snapshot); err != nil {
 		return err
 	}
-	if cid, offered := extensionnegotiation.ConnectionIDOffer(snapshot); offered {
+	if cid, offered := negotiation.ConnectionIDOffer(snapshot); offered {
 		s.pendingLocalConnectionID.Store(&cid)
 	} else {
 		s.pendingLocalConnectionID.Store(nil)
@@ -128,11 +131,12 @@ func (s *Common) RecordLocalClientHello(snapshot extensionnegotiation.ClientHell
 func (s *Common) ResetConnectionIDs() {
 	s.SetLocalConnectionID(nil)
 	s.RemoteConnectionID, s.LocalCIDOffered, s.RemoteCIDOffered = nil, false, false
+	s.RRCNegotiated = false
 	s.pendingLocalConnectionID.Store(nil)
 }
 
 // CommitNegotiatedExtensions applies a fully validated extension decision.
-func (s *Common) CommitNegotiatedExtensions(decision *extensionnegotiation.ConnectionID) {
+func (s *Common) CommitNegotiatedExtensions(decision *negotiation.ConnectionID) {
 	if decision == nil {
 		s.ResetConnectionIDs()
 
@@ -146,6 +150,7 @@ func (s *Common) CommitNegotiatedExtensions(decision *extensionnegotiation.Conne
 	s.SetLocalConnectionID(bytes.Clone(localCID))
 	s.RemoteConnectionID = bytes.Clone(remoteCID)
 	s.LocalCIDOffered, s.RemoteCIDOffered = true, true
+	s.RRCNegotiated = decision.ReturnRoutabilityCheck
 	s.pendingLocalConnectionID.Store(nil)
 }
 

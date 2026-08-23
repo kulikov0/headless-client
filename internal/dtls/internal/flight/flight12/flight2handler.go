@@ -4,12 +4,12 @@
 package flight12
 
 import (
-	"bytes"
 	"context"
 
 	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
 	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
@@ -48,16 +48,16 @@ func flight2Parse(
 			dtlserrors.ErrUnsupportedProtocolVersion
 	}
 
-	if len(clientHello.Cookie) == 0 {
-		return 0, nil, nil
-	}
-	if !bytes.Equal(state.Cookie, clientHello.Cookie) {
-		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.AccessDenied}, dtlserrors.ErrCookieMismatch
-	}
-
-	if err := state.RemoteClientHelloSnapshots.RecordWire(pull.Items[0].Raw.Data); err != nil {
+	snapshots := state.RemoteClientHelloSnapshots
+	if err := snapshots.RecordWire(pull.Items[0].Raw.Data); err != nil {
 		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.IllegalParameter}, err
 	}
+	if err := negotiation.ValidateHelloVerifyRequestResponse(
+		snapshots.Initial(), snapshots.Current(), state.Cookie,
+	); err != nil {
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.IllegalParameter}, err
+	}
+	state.RemoteClientHelloSnapshots = snapshots
 
 	return Flight4, nil, nil
 }

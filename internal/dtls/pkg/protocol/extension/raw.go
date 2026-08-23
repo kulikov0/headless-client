@@ -21,6 +21,7 @@ const (
 	TypeSignatureAlgorithms     Type = 13
 	TypeUseSRTP                 Type = 14
 	TypeALPN                    Type = 16
+	TypePadding                 Type = 21
 	TypeExtendedMasterSecret    Type = 23
 	TypePreSharedKey            Type = 41
 	TypeEarlyData               Type = 42
@@ -33,6 +34,7 @@ const (
 	TypeSignatureAlgorithmsCert Type = 50
 	TypeKeyShare                Type = 51
 	TypeConnectionID            Type = 54
+	TypeReturnRoutabilityCheck  Type = 61
 	TypeRenegotiationInfo       Type = 65281
 )
 

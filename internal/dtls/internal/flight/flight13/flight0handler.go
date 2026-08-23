@@ -12,6 +12,7 @@ import (
 	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
 	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
+	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
 	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
@@ -46,6 +47,7 @@ func flight0Parse(
 	// https://datatracker.ietf.org/doc/html/rfc9146#name-the-connection_id-extension
 	state.ResetConnectionIDs()
 	state.RemoteClientHelloSnapshots.Reset()
+	state.HelloRetryRequest = negotiation.RetryRequest{}
 
 	state.HandshakeRecvSequence = pull.NextSequence
 
