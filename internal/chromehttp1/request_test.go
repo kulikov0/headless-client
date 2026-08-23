@@ -51,9 +51,9 @@ func TestChromeRequestReproducesTheDocumentOrder(t *testing.T) {
 		"Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest", "Accept-Encoding")
 
 	want := []string{
-		"Host", "Connection", "Upgrade-Insecure-Requests", "User-Agent", "Accept-Language",
+		"Host", "Connection", "Upgrade-Insecure-Requests", "User-Agent",
 		"Accept", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest",
-		"Accept-Encoding",
+		"Accept-Encoding", "Accept-Language",
 	}
 	if got := writtenHeaderNames(t, request); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("order =\n %v\nwant\n %v", got, want)
@@ -68,8 +68,8 @@ func TestChromeRequestReproducesTheXHROrder(t *testing.T) {
 
 	want := []string{
 		"Host", "Connection", "Client-Version", "X-Request-Id", "User-Agent",
-		"Content-Type", "Accept-Language", "Accept", "Origin", "Sec-Fetch-Site",
-		"Sec-Fetch-Mode", "Sec-Fetch-Dest", "Referer", "Accept-Encoding", "Cookie",
+		"Content-Type", "Accept", "Origin", "Sec-Fetch-Site",
+		"Sec-Fetch-Mode", "Sec-Fetch-Dest", "Referer", "Accept-Encoding", "Accept-Language", "Cookie",
 	}
 	if got := writtenHeaderNames(t, request); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("order =\n %v\nwant\n %v", got, want)
@@ -83,9 +83,9 @@ func TestChromeRequestReproducesTheWebSocketOrder(t *testing.T) {
 	request.Header.Set("Connection", "Upgrade")
 
 	want := []string{
-		"Host", "Connection", "Pragma", "Cache-Control", "User-Agent", "Accept-Language",
-		"Upgrade", "Origin", "Sec-WebSocket-Version", "Accept-Encoding", "Sec-WebSocket-Key",
-		"Sec-WebSocket-Extensions",
+		"Host", "Connection", "Pragma", "Cache-Control", "User-Agent",
+		"Upgrade", "Origin", "Sec-WebSocket-Version", "Accept-Encoding", "Accept-Language",
+		"Sec-WebSocket-Key", "Sec-WebSocket-Extensions",
 	}
 	if got := writtenHeaderNames(t, request); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("order =\n %v\nwant\n %v", got, want)
@@ -159,8 +159,8 @@ func TestChromeRequestReproducesTheAPIPostOrder(t *testing.T) {
 
 	want := []string{
 		"Host", "Connection", "Content-Length", "X-Request-Id", "User-Agent",
-		"Content-Type", "Accept-Language", "Accept", "Origin", "Sec-Fetch-Site",
-		"Sec-Fetch-Mode", "Sec-Fetch-Dest", "Referer", "Accept-Encoding", "Cookie",
+		"Content-Type", "Accept", "Origin", "Sec-Fetch-Site",
+		"Sec-Fetch-Mode", "Sec-Fetch-Dest", "Referer", "Accept-Encoding", "Accept-Language", "Cookie",
 	}
 	if got := writtenHeaderNames(t, request); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("order =\n %v\nwant\n %v", got, want)

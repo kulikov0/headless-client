@@ -19,11 +19,11 @@ func TestOrderedHeaderKeysChromeOrder(t *testing.T) {
 	got := orderedHeaderKeys(header)
 	want := []string{
 		"User-Agent",
-		"Accept-Language",
 		"Accept",
 		"Sec-Fetch-Site",
 		"Referer",
 		"Accept-Encoding",
+		"Accept-Language",
 		"Cookie",
 		"X-Custom",
 	}
