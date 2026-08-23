@@ -9,7 +9,7 @@ import (
 )
 
 type capturedHandshake struct {
-	settings          []Setting
+	settings            []Setting
 	connWindowIncrement uint32
 }
 
