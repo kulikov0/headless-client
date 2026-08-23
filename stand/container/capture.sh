@@ -62,6 +62,8 @@ captures=()
 for role in "${roles[@]}"; do
   tcpdump -i "veth-$role" -s 0 -U -w "$out/$role.pcap" >/dev/null 2>"$out/$role.tcpdump.log" &
   captures+=("$!")
+  ip netns exec "$role" tcpdump -i lo -s 0 -U -w "$out/$role.loopback.pcap" >/dev/null 2>"$out/$role.loopback.tcpdump.log" &
+  captures+=("$!")
 done
 sleep 1
 

@@ -121,10 +121,12 @@ Each capture directory contains the following files for every role:
 
 | File | Contents |
 | --- | --- |
-| `<role>.pcap` | Captured packets. |
+| `<role>.pcap` | Packets on the host end of the role's veth pair. |
+| `<role>.loopback.pcap` | Packets on the loopback interface inside the role's namespace. Traffic between two processes in the same role appears here and not in `<role>.pcap`. |
 | `<role>.keys` | TLS session keys in `SSLKEYLOGFILE` format. Use them to decrypt the pcap. |
 | `<role>.stdout.log` | Standard output and standard error of the role. |
 | `<role>.tcpdump.log` | Standard error of tcpdump. Check this if a pcap is empty. |
+| `<role>.loopback.tcpdump.log` | Standard error of the loopback tcpdump. |
 
 The directory also contains `manifest.json`, which records the capture time, the
 versions of Chromium, tshark, and tcpdump, the kernel version, and the address
@@ -208,17 +210,11 @@ contain `curl`.
 
 ### Traffic between two processes in one role is missing
 
-`tcpdump` runs on the host end of the veth pair, so it does not see traffic that
-stays on the loopback interface. To capture loopback traffic, add a second
-`tcpdump` inside the namespace:
-
-```
-ip netns exec <role> tcpdump -i lo -s 0 -U -w <role>.lo.pcap
-```
-
-`-i any` also works and the parser reads it, but it records the veth traffic as
-well, which the role's main capture already contains. Use `-i lo` to keep the
-two captures separate.
+Look in `<role>.loopback.pcap` instead of `<role>.pcap`. The main capture runs on
+the host end of the veth pair and does not see traffic that stays on the loopback
+interface. Two processes in the same role reach each other over loopback, and so
+do two sockets in one process, including two `RTCPeerConnection` objects in one
+browser tab.
 
 ### The browser stream does not load
 
