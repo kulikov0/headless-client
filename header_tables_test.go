@@ -106,39 +106,53 @@ func loweredHeaderNames(names []string) []string {
 	return lowered
 }
 
+var headerOrderTables = []struct {
+	shape         string
+	http1Variable string
+	http2Variable string
+	sharedMinimum int
+}{
+	{"subresource", "chromeHTTP1HeaderOrder", "chromeHeaderOrder", 10},
+	{"navigation", "chromeHTTP1NavigationHeaderOrder", "chromeNavigationHeaderOrder", 8},
+}
+
 func TestSharedHeadersKeepTheSameRelativeOrder(t *testing.T) {
-	http1Order := loweredHeaderNames(headerOrderFromSource(t, http1RequestSource, "chromeHTTP1HeaderOrder"))
-	http2Order := loweredHeaderNames(headerOrderFromSource(t, http2RequestSource, "chromeHeaderOrder"))
+	for _, table := range headerOrderTables {
+		http1Order := loweredHeaderNames(headerOrderFromSource(t, http1RequestSource, table.http1Variable))
+		http2Order := loweredHeaderNames(headerOrderFromSource(t, http2RequestSource, table.http2Variable))
 
-	sharedInHTTP1 := make([]string, 0, len(http1Order))
-	for _, name := range http1Order {
-		if slices.Contains(http2Order, name) {
-			sharedInHTTP1 = append(sharedInHTTP1, name)
+		sharedInHTTP1 := make([]string, 0, len(http1Order))
+		for _, name := range http1Order {
+			if slices.Contains(http2Order, name) {
+				sharedInHTTP1 = append(sharedInHTTP1, name)
+			}
 		}
-	}
-	if len(sharedInHTTP1) < 10 {
-		t.Fatalf("only %d shared headers, the tables no longer overlap enough to compare", len(sharedInHTTP1))
-	}
+		if len(sharedInHTTP1) < table.sharedMinimum {
+			t.Fatalf("%s tables share only %d headers, they no longer overlap enough to compare", table.shape, len(sharedInHTTP1))
+		}
 
-	sharedInHTTP2 := make([]string, 0, len(sharedInHTTP1))
-	for _, name := range http2Order {
-		if slices.Contains(sharedInHTTP1, name) {
-			sharedInHTTP2 = append(sharedInHTTP2, name)
+		sharedInHTTP2 := make([]string, 0, len(sharedInHTTP1))
+		for _, name := range http2Order {
+			if slices.Contains(sharedInHTTP1, name) {
+				sharedInHTTP2 = append(sharedInHTTP2, name)
+			}
 		}
-	}
-	if !slices.Equal(sharedInHTTP1, sharedInHTTP2) {
-		t.Fatalf("headers carried by both tables are ordered differently, one table was re-measured without the other\n http1: %v\n http2: %v",
-			sharedInHTTP1, sharedInHTTP2)
+		if !slices.Equal(sharedInHTTP1, sharedInHTTP2) {
+			t.Fatalf("%s headers carried by both tables are ordered differently, one table was re-measured without the other\n http1: %v\n http2: %v",
+				table.shape, sharedInHTTP1, sharedInHTTP2)
+		}
 	}
 }
 
 func TestVendorPatchCarriesTheGeneratedHeaderOrder(t *testing.T) {
-	generated := headerOrderFromSource(t, http2RequestSource, "chromeHeaderOrder")
-	patched := headerOrderFromPatch(t, http2VendorPatch, "chromeHeaderOrder")
+	for _, table := range headerOrderTables {
+		generated := headerOrderFromSource(t, http2RequestSource, table.http2Variable)
+		patched := headerOrderFromPatch(t, http2VendorPatch, table.http2Variable)
 
-	if !slices.Equal(generated, patched) {
-		t.Fatalf("%s would revert the header order on the next regeneration\n file:  %v\n patch: %v",
-			http2VendorPatch, generated, patched)
+		if !slices.Equal(generated, patched) {
+			t.Fatalf("%s would revert the %s order on the next regeneration\n file:  %v\n patch: %v",
+				http2VendorPatch, table.shape, generated, patched)
+		}
 	}
 }
 

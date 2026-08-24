@@ -45,8 +45,8 @@ var chromeServerHelloExtensionOrder = []uint16{
 }
 
 // chromeICEKeepaliveInterval is measured. libwebrtc sets
-// STRONG_AND_STABLE_WRITABLE_CONNECTION_PING_INTERVAL to 2500ms in
-// p2p/base/p2p_constants.cc. Chrome sends 2656ms on the wire. The 156ms
+// kStrongAndStableWritableConnectionPingInterval to 2500ms in
+// p2p/base/p2p_constants.h. Chrome sends 2656ms on the wire. The 156ms
 // difference is unexplained.
 //
 // The value reproduced across five captures, two machines, three services and

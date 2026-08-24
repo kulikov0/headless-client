@@ -1,28 +1,38 @@
 package headlessclient
 
 import (
+	"strconv"
+
 	utls "github.com/refraction-networking/utls"
 )
 
-const measuredChromeVersion = "151"
+const measuredChromeMajorVersion = 151
+
+var measuredChromeVersion = strconv.Itoa(measuredChromeMajorVersion)
 
 type Profile struct {
-	name           string
-	userAgent      string
-	acceptLanguage string
-	clientHelloID  utls.ClientHelloID
-	dtlsShuffle    bool
-	dtlsGREASE     bool
-	dtls13Mimic    bool
+	name               string
+	userAgent          string
+	acceptLanguage     string
+	clientHintBrands   string
+	clientHintMobile   string
+	clientHintPlatform string
+	clientHelloID      utls.ClientHelloID
+	dtlsShuffle        bool
+	dtlsGREASE         bool
+	dtls13Mimic        bool
 }
 
 var ChromeWindows = Profile{
-	name:           "ChromeWindows",
-	userAgent:      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + measuredChromeVersion + ".0.0.0 Safari/537.36",
-	acceptLanguage: "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-	clientHelloID:  utls.HelloChrome_133,
-	dtlsShuffle:    true,
-	dtlsGREASE:     true,
+	name:               "ChromeWindows",
+	userAgent:          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + measuredChromeVersion + ".0.0.0 Safari/537.36",
+	acceptLanguage:     "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+	clientHintBrands:   clientHintBrandList(measuredChromeMajorVersion, "Google Chrome"),
+	clientHintMobile:   "?0",
+	clientHintPlatform: `"Windows"`,
+	clientHelloID:      utls.HelloChrome_133,
+	dtlsShuffle:        true,
+	dtlsGREASE:         true,
 }
 
 func (p Profile) Name() string {

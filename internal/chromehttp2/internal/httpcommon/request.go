@@ -57,16 +57,13 @@ type EncodeHeadersResult struct {
 	HasTrailers bool
 }
 
-var chromeHeaderOrder = []string{
-	"content-length",
+var chromeNavigationHeaderOrder = []string{
+	"sec-ch-ua",
+	"sec-ch-ua-mobile",
 	"sec-ch-ua-platform",
 	"upgrade-insecure-requests",
 	"user-agent",
-	"sec-ch-ua",
-	"content-type",
-	"sec-ch-ua-mobile",
 	"accept",
-	"origin",
 	"sec-fetch-site",
 	"sec-fetch-mode",
 	"sec-fetch-user",
@@ -79,29 +76,82 @@ var chromeHeaderOrder = []string{
 	"priority",
 }
 
-var chromeHeaderRank = buildChromeHeaderRank()
+var chromeHeaderOrder = []string{
+	"content-length",
+	"sec-ch-ua-platform",
+	"user-agent",
+	"sec-ch-ua",
+	"content-type",
+	"sec-ch-ua-mobile",
+	"accept",
+	"origin",
+	"sec-fetch-site",
+	"sec-fetch-mode",
+	"sec-fetch-dest",
+	"sec-fetch-storage-access",
+	"referer",
+	"accept-encoding",
+	"accept-language",
+	"cookie",
+	"priority",
+}
 
-func buildChromeHeaderRank() map[string]int {
-	rank := make(map[string]int, len(chromeHeaderOrder))
-	for index, name := range chromeHeaderOrder {
+var chromeNavigationHeaderRank = buildChromeHeaderRank(chromeNavigationHeaderOrder)
+
+var chromeHeaderRank = buildChromeHeaderRank(chromeHeaderOrder)
+
+func buildChromeHeaderRank(order []string) map[string]int {
+	rank := make(map[string]int, len(order))
+	for index, name := range order {
 		rank[name] = index
 	}
 	return rank
 }
 
+func chromeHeaderRankFor(header map[string][]string) map[string]int {
+	for name := range header {
+		if strings.EqualFold(name, "upgrade-insecure-requests") {
+			return chromeNavigationHeaderRank
+		}
+	}
+
+	return chromeHeaderRank
+}
+
+const chromeTrailingHeader = "priority"
+
+const (
+	chromeTableHeaderGroup = iota
+	chromeUnknownHeaderGroup
+	chromeTrailingHeaderGroup
+)
+
+func chromeHeaderGroup(name string, rank map[string]int) (int, int) {
+	lowered := strings.ToLower(name)
+	if lowered == chromeTrailingHeader {
+		return chromeTrailingHeaderGroup, 0
+	}
+	if index, known := rank[lowered]; known {
+		return chromeTableHeaderGroup, index
+	}
+
+	return chromeUnknownHeaderGroup, 0
+}
+
 func orderedHeaderKeys(header map[string][]string) []string {
+	rank := chromeHeaderRankFor(header)
 	keys := make([]string, 0, len(header))
 	for name := range header {
 		keys = append(keys, name)
 	}
 	sort.SliceStable(keys, func(i, j int) bool {
-		firstRank, firstKnown := chromeHeaderRank[strings.ToLower(keys[i])]
-		secondRank, secondKnown := chromeHeaderRank[strings.ToLower(keys[j])]
-		if firstKnown && secondKnown {
-			return firstRank < secondRank
+		firstGroup, firstRank := chromeHeaderGroup(keys[i], rank)
+		secondGroup, secondRank := chromeHeaderGroup(keys[j], rank)
+		if firstGroup != secondGroup {
+			return firstGroup < secondGroup
 		}
-		if firstKnown != secondKnown {
-			return firstKnown
+		if firstGroup == chromeTableHeaderGroup {
+			return firstRank < secondRank
 		}
 		return keys[i] < keys[j]
 	})

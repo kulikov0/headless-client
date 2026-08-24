@@ -8,23 +8,45 @@ import (
 	"strings"
 )
 
+var chromeHTTP1NavigationHeaderOrder = []string{
+	"Host",
+	"Connection",
+	"sec-ch-ua",
+	"sec-ch-ua-mobile",
+	"sec-ch-ua-platform",
+	"Upgrade-Insecure-Requests",
+	"",
+	"User-Agent",
+	"Accept",
+	"Sec-Fetch-Site",
+	"Sec-Fetch-Mode",
+	"Sec-Fetch-User",
+	"Sec-Fetch-Dest",
+	"Sec-Fetch-Storage-Access",
+	"Referer",
+	"Accept-Encoding",
+	"Accept-Language",
+	"Cookie",
+}
+
 var chromeHTTP1HeaderOrder = []string{
 	"Host",
 	"Connection",
 	"Content-Length",
+	"sec-ch-ua-platform",
 	"Pragma",
 	"Cache-Control",
-	"Upgrade-Insecure-Requests",
 	"",
 	"User-Agent",
+	"sec-ch-ua",
 	"Content-Type",
+	"sec-ch-ua-mobile",
 	"Accept",
 	"Upgrade",
 	"Origin",
 	"Sec-WebSocket-Version",
 	"Sec-Fetch-Site",
 	"Sec-Fetch-Mode",
-	"Sec-Fetch-User",
 	"Sec-Fetch-Dest",
 	"Sec-Fetch-Storage-Access",
 	"Referer",
@@ -34,6 +56,14 @@ var chromeHTTP1HeaderOrder = []string{
 	"Sec-WebSocket-Extensions",
 	"Sec-WebSocket-Protocol",
 	"Cookie",
+}
+
+func chromeHTTP1OrderFor(present map[string]bool) []string {
+	if present["Upgrade-Insecure-Requests"] {
+		return chromeHTTP1NavigationHeaderOrder
+	}
+
+	return chromeHTTP1HeaderOrder
 }
 
 func indexHeader(header http.Header) (map[string][]string, map[string]string) {
@@ -57,8 +87,9 @@ func orderedHeaderNames(values map[string][]string, casing map[string]string, ho
 		present["Host"] = true
 	}
 
-	placed := make(map[string]bool, len(chromeHTTP1HeaderOrder))
-	for _, name := range chromeHTTP1HeaderOrder {
+	order := chromeHTTP1OrderFor(present)
+	placed := make(map[string]bool, len(order))
+	for _, name := range order {
 		if name != "" {
 			placed[http.CanonicalHeaderKey(name)] = true
 		}
@@ -73,7 +104,7 @@ func orderedHeaderNames(values map[string][]string, casing map[string]string, ho
 	sort.Strings(unordered)
 
 	names := make([]string, 0, len(present))
-	for _, name := range chromeHTTP1HeaderOrder {
+	for _, name := range order {
 		if name == "" {
 			names = append(names, unordered...)
 			continue
@@ -96,6 +127,7 @@ func WriteRequest(writer io.Writer, request *http.Request) error {
 	if header == nil {
 		header = http.Header{}
 	}
+	header.Del("Priority")
 	if header.Get("Connection") == "" {
 		header.Set("Connection", "keep-alive")
 	}

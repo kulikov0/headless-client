@@ -167,6 +167,32 @@ func TestChromeRequestReproducesTheAPIPostOrder(t *testing.T) {
 	}
 }
 
+func TestChromeRequestPlacesTheClientHintsAroundUserAgent(t *testing.T) {
+	request := requestWithHeaders(t, "https://api.example.com/v1/items",
+		"sec-ch-ua-platform", "User-Agent", "sec-ch-ua", "Content-Type", "sec-ch-ua-mobile",
+		"Accept", "Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest",
+		"Referer", "Accept-Encoding", "Accept-Language", "Cookie")
+
+	want := []string{
+		"Host", "Connection", "sec-ch-ua-platform", "User-Agent", "sec-ch-ua",
+		"Content-Type", "sec-ch-ua-mobile", "Accept", "Origin", "Sec-Fetch-Site",
+		"Sec-Fetch-Mode", "Sec-Fetch-Dest", "Referer", "Accept-Encoding", "Accept-Language", "Cookie",
+	}
+	if got := writtenHeaderNames(t, request); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("order =\n %v\nwant\n %v", got, want)
+	}
+}
+
+func TestChromeRequestDropsThePriorityHeader(t *testing.T) {
+	request := requestWithHeaders(t, "https://api.example.com/v1/items", "User-Agent", "Priority")
+
+	for _, name := range writtenHeaderNames(t, request) {
+		if strings.EqualFold(name, "Priority") {
+			t.Fatal("priority reached the http/1.1 wire, chrome only sends it on http/2 and http/3")
+		}
+	}
+}
+
 func TestChromeRequestFindsNonCanonicalHeaderKeys(t *testing.T) {
 	request, err := http.NewRequest(http.MethodGet, "https://ws.example.com/ws", nil)
 	if err != nil {
