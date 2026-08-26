@@ -9,12 +9,12 @@ import (
 	"bytes"
 	"sync/atomic"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/negotiation"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/negotiation"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 	"github.com/pion/transport/v4/replaydetector"
 )
 

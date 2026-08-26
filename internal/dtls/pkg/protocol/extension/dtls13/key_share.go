@@ -7,9 +7,9 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
 )
 
 // KeyShareEntry contains the encoded key exchange for a named group.

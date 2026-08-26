@@ -6,7 +6,7 @@ package extension
 import (
 	"bytes"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 )
 
 // ConnectionID is a DTLS extension that provides an alternative to IP address

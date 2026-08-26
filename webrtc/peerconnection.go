@@ -18,15 +18,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pion/ice/v4"
+	"github.com/kulikov0/headless-client/internal/ice"
+	"github.com/kulikov0/headless-client/webrtc/internal/util"
+	"github.com/kulikov0/headless-client/webrtc/pkg/rtcerr"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/srtp/v3"
-	"github.com/kulikov0/headlessclient/webrtc/internal/util"
-	"github.com/kulikov0/headlessclient/webrtc/pkg/rtcerr"
 )
 
 // PeerConnection represents a WebRTC connection that establishes a

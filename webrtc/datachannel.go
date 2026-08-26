@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kulikov0/headless-client/webrtc/pkg/rtcerr"
 	"github.com/pion/datachannel"
 	"github.com/pion/logging"
-	"github.com/kulikov0/headlessclient/webrtc/pkg/rtcerr"
 )
 
 var errSCTPNotEstablished = errors.New("SCTP not established")

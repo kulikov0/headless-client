@@ -11,10 +11,10 @@ import (
 	"slices"
 	"time"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 	"github.com/pion/logging"
 )
 

@@ -8,7 +8,7 @@ import (
 	"crypto/hkdf"
 	"hash"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 	"golang.org/x/crypto/cryptobyte"
 )
 

@@ -8,9 +8,9 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 	"golang.org/x/crypto/chacha20poly1305"
 )
 

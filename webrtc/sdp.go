@@ -16,7 +16,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/pion/ice/v4"
+	"github.com/kulikov0/headless-client/internal/ice"
 	"github.com/pion/logging"
 	"github.com/pion/sdp/v3"
 )

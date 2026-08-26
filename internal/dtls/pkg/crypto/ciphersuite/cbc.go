@@ -11,11 +11,11 @@ import (
 	"encoding/binary"
 	"hash"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/util"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/prf"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/util"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/prf"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 	"golang.org/x/crypto/cryptobyte"
 )
 

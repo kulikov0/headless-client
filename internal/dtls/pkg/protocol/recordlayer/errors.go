@@ -5,7 +5,7 @@
 package recordlayer
 
 import (
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 )
 
 // ErrInvalidPacketLength is returned when the packet length too small

@@ -3,7 +3,7 @@
 
 package dtls
 
-import "github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
+import "github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
 
 // SRTPProtectionProfile defines the parameters and options that are in effect for the SRTP processing
 // https://tools.ietf.org/html/rfc5764#section-4.1.2

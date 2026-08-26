@@ -10,8 +10,8 @@ package webrtc
 import (
 	"syscall/js"
 
-	"github.com/pion/ice/v4"
-	"github.com/kulikov0/headlessclient/webrtc/pkg/rtcerr"
+	"github.com/kulikov0/headless-client/internal/ice"
+	"github.com/kulikov0/headless-client/webrtc/pkg/rtcerr"
 )
 
 // PeerConnection represents a WebRTC connection that establishes a

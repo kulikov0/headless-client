@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
 )
 
 var (

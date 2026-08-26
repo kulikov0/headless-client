@@ -7,8 +7,8 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite/types"
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite/types"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 )
 
 // MessageClientKeyExchange is a DTLS Handshake Message

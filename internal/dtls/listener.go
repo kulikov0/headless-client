@@ -6,10 +6,10 @@ package dtls
 import (
 	"net"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/net/udp"
-	dtlsnet "github.com/kulikov0/headlessclient/internal/dtls/pkg/net"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/net/udp"
+	dtlsnet "github.com/kulikov0/headless-client/internal/dtls/pkg/net"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
 func listenWithConfig(network string, laddr *net.UDPAddr, config *dtlsConfig) (net.Listener, error) {

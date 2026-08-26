@@ -4,8 +4,8 @@
 package signaturehash
 
 import (
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/hash"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/signature"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/hash"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signature"
 )
 
 // Algorithms13 returns signature algorithms compatible with DTLS 1.3. This.

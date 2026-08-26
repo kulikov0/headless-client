@@ -6,13 +6,13 @@ package dtlshandshake
 import (
 	"context"
 
-	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
-	dtlsflight13 "github.com/kulikov0/headlessclient/internal/dtls/internal/flight/flight13"
-	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
+	dtlsconfig "github.com/kulikov0/headless-client/internal/dtls/internal/config"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	dtlsflight "github.com/kulikov0/headless-client/internal/dtls/internal/flight"
+	dtlsflight13 "github.com/kulikov0/headless-client/internal/dtls/internal/flight/flight13"
+	dtlsstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
 )
 
 // handshakeContext groups the DTLS 1.3 state that must move together while

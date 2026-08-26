@@ -3,7 +3,7 @@
 
 package ciphersuite
 
-import "github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/clientcertificate"
+import "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/clientcertificate"
 
 // TLSPskWithAes128GcmSha256 implements the TLS_PSK_WITH_AES_128_GCM_SHA256 CipherSuite.
 type TLSPskWithAes128GcmSha256 struct {

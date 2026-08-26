@@ -6,10 +6,10 @@ package dtlshandshake
 import (
 	"context"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite"
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	dtlsflight13 "github.com/kulikov0/headlessclient/internal/dtls/internal/flight/flight13"
-	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	dtlsflight13 "github.com/kulikov0/headless-client/internal/dtls/internal/flight/flight13"
+	dtlsstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
 )
 
 func InitHandshakeRecordProtection(state *dtlsstate.State13) error {

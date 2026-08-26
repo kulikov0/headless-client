@@ -1,4 +1,4 @@
-module github.com/kulikov0/headlessclient/stand
+module github.com/kulikov0/headless-client/stand
 
 go 1.26.1
 

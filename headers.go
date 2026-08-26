@@ -1,4 +1,4 @@
-package headlessclient
+package headless
 
 import "net/http"
 

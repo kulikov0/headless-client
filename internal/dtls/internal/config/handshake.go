@@ -14,14 +14,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite"
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	internalstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/signaturehash"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	internalstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signaturehash"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 	"github.com/pion/logging"
 )
 

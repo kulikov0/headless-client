@@ -7,13 +7,13 @@ import (
 	"bytes"
 	"slices"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
-	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
-	extension13 "github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension/dtls13"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	dtlsflight "github.com/kulikov0/headless-client/internal/dtls/internal/flight"
+	dtlsstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
+	extension13 "github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension/dtls13"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 )
 
 type clientHelloExtensionSet struct {

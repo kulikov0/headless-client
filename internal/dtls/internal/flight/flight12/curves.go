@@ -6,7 +6,7 @@ package flight12
 import (
 	"slices"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
 )
 
 func supportedEllipticCurves(curves []elliptic.Curve) []elliptic.Curve {

@@ -7,14 +7,14 @@ import (
 	"context"
 	"time"
 
-	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
-	dtlsflight13 "github.com/kulikov0/headlessclient/internal/dtls/internal/flight/flight13"
-	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	dtlsconfig "github.com/kulikov0/headless-client/internal/dtls/internal/config"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	dtlsflight "github.com/kulikov0/headless-client/internal/dtls/internal/flight"
+	dtlsflight13 "github.com/kulikov0/headless-client/internal/dtls/internal/flight/flight13"
+	dtlsstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 )
 
 // [RFC9147 Section-5.8.1]

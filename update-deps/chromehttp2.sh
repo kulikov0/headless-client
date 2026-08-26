@@ -5,7 +5,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${1:-v0.55.0}"
 UD="$REPO/update-deps"
 DST="$REPO/internal/chromehttp2"
-MOD="github.com/kulikov0/headlessclient/internal/chromehttp2"
+MOD="github.com/kulikov0/headless-client/internal/chromehttp2"
 
 go -C "$REPO" mod download "golang.org/x/net@$VERSION"
 SRC="$(go env GOMODCACHE)/golang.org/x/net@$VERSION"

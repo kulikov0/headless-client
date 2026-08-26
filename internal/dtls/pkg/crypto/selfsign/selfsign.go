@@ -17,7 +17,7 @@ import (
 	"math/big"
 	"time"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 )
 
 // GenerateSelfSigned creates a self-signed certificate.

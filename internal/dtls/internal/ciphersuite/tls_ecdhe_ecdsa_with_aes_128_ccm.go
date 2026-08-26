@@ -4,8 +4,8 @@
 package ciphersuite
 
 import (
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/ciphersuite"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/clientcertificate"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/clientcertificate"
 )
 
 // NewTLSEcdheEcdsaWithAes128Ccm constructs a TLS_ECDHE_ECDSA_WITH_AES_128_CCM Cipher.

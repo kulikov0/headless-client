@@ -12,9 +12,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/hash"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/signature"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/hash"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signature"
 )
 
 // Algorithm is a signature/hash algorithm pairs which may be used in

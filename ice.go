@@ -1,9 +1,9 @@
-package headlessclient
+package headless
 
 import (
 	"crypto/rand"
 
-	"github.com/kulikov0/headlessclient/webrtc"
+	"github.com/kulikov0/headless-client/webrtc"
 )
 
 const (
@@ -12,10 +12,7 @@ const (
 	iceCharacters                   = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 )
 
-func (p Profile) ApplyICECredentials(settingEngine *webrtc.SettingEngine) error {
-	if settingEngine == nil {
-		return nil
-	}
+func (p Profile) applyICECredentials(settingEngine *webrtc.SettingEngine) error {
 	usernameFragment, err := randomICEString(chromeICEUsernameFragmentLength)
 	if err != nil {
 		return err

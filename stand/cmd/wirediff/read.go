@@ -10,7 +10,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcapgo"
 
-	"github.com/kulikov0/headlessclient/stand/internal/wire"
+	"github.com/kulikov0/headless-client/stand/internal/wire"
 )
 
 const (

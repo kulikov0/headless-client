@@ -1,4 +1,4 @@
-package headlessclient
+package headless
 
 import (
 	"bytes"
@@ -260,6 +260,19 @@ func TestCloseIdleConnectionsDropsThePool(t *testing.T) {
 
 	if got := connections.Load(); got != 2 {
 		t.Fatalf("opened %d connections, want 1 before and 1 after the pool was dropped", got)
+	}
+}
+
+func TestTransportReturnsAPoolTheCallerOwns(t *testing.T) {
+	first := ChromeWindows.Transport(TLSOptions{})
+	second := ChromeWindows.Transport(TLSOptions{})
+	if first == second {
+		t.Fatal("Transport returned the same round tripper twice, each call must own its pool")
+	}
+
+	shared := ChromeWindows.HTTPClient().Transport
+	if shared == first || shared == second {
+		t.Fatal("HTTPClient handed back a transport built by Transport, the shared pool must stay separate")
 	}
 }
 

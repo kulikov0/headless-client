@@ -6,10 +6,10 @@ package dtlshandshake
 import (
 	"context"
 
-	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+	dtlsflight "github.com/kulikov0/headless-client/internal/dtls/internal/flight"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
 // RecvHandshakeState signals that a handshake packet has been received.

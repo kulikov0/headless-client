@@ -6,8 +6,10 @@ VERSION="${1:-v4.2.11}"
 DST="$REPO/webrtc"
 OLD_WEBRTC="github.com/pion/webrtc/v4"
 OLD_DTLS="github.com/pion/dtls/v3"
-NEW_WEBRTC="github.com/kulikov0/headlessclient/webrtc"
-NEW_DTLS="github.com/kulikov0/headlessclient/internal/dtls"
+OLD_ICE="github.com/pion/ice/v4"
+NEW_WEBRTC="github.com/kulikov0/headless-client/webrtc"
+NEW_DTLS="github.com/kulikov0/headless-client/internal/dtls"
+NEW_ICE="github.com/kulikov0/headless-client/internal/ice"
 
 go -C "$REPO" mod download "$OLD_WEBRTC@$VERSION"
 SRC="$(go env GOMODCACHE)/$OLD_WEBRTC@$VERSION"
@@ -25,11 +27,11 @@ find "$DST" -name '*_test.go' -delete
 find "$DST" -type d \( -name testdata -o -name examples -o -name e2e \) -exec rm -rf {} + 2>/dev/null || true
 rm -f "$DST/README.md" "$DST/codecov.yml" "$DST/renovate.json"
 
-grep -rl "$OLD_WEBRTC\|$OLD_DTLS" "$DST" --include='*.go' | while read -r f; do
-  perl -pi -e "s#\\Q$OLD_WEBRTC\\E#$NEW_WEBRTC#g; s#\\Q$OLD_DTLS\\E#$NEW_DTLS#g" "$f"
+grep -rl "$OLD_WEBRTC\|$OLD_DTLS\|$OLD_ICE" "$DST" --include='*.go' | while read -r f; do
+  perl -pi -e "s#\\Q$OLD_WEBRTC\\E#$NEW_WEBRTC#g; s#\\Q$OLD_DTLS\\E#$NEW_DTLS#g; s#\\Q$OLD_ICE\\E#$NEW_ICE#g" "$f"
 done
 
-if grep -rq "$OLD_WEBRTC\|$OLD_DTLS" "$DST" --include='*.go'; then
+if grep -rq "$OLD_WEBRTC\|$OLD_DTLS\|$OLD_ICE" "$DST" --include='*.go'; then
   echo "residual upstream references remain" >&2
   exit 1
 fi

@@ -5,10 +5,10 @@
 package handshake
 
 import (
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite/types"
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/util"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite/types"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/util"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 )
 
 // Type is the unique identifier for each handshake message

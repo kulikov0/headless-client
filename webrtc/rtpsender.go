@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kulikov0/headless-client/webrtc/internal/util"
 	"github.com/pion/interceptor"
 	"github.com/pion/randutil"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
-	"github.com/kulikov0/headlessclient/webrtc/internal/util"
 )
 
 type trackEncoding struct {

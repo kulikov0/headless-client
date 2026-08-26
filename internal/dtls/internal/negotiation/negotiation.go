@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"slices"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 )
 
 // ClientHelloSnapshot is an immutable copy of a validated ClientHello body.

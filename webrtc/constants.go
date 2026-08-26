@@ -6,7 +6,7 @@ package webrtc
 import (
 	"math"
 
-	"github.com/kulikov0/headlessclient/internal/dtls"
+	"github.com/kulikov0/headless-client/internal/dtls"
 )
 
 const (

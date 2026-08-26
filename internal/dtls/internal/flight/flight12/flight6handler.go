@@ -6,14 +6,14 @@ package flight12
 import (
 	"context"
 
-	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
-	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
-	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/prf"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/alert"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+	dtlsconfig "github.com/kulikov0/headless-client/internal/dtls/internal/config"
+	dtlsflight "github.com/kulikov0/headless-client/internal/dtls/internal/flight"
+	dtlsstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/prf"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
 func flight6Parse(

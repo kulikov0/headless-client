@@ -3,7 +3,7 @@
 
 package extension
 
-import dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+import dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 
 // ReturnRoutabilityCheck negotiates the RFC 9853 RRC subprotocol.
 type ReturnRoutabilityCheck struct{}

@@ -23,9 +23,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	idtlsnet "github.com/kulikov0/headlessclient/internal/dtls/internal/net"
-	dtlsnet "github.com/kulikov0/headlessclient/internal/dtls/pkg/net"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	idtlsnet "github.com/kulikov0/headless-client/internal/dtls/internal/net"
+	dtlsnet "github.com/kulikov0/headless-client/internal/dtls/pkg/net"
 	"github.com/pion/transport/v4/deadline"
 )
 

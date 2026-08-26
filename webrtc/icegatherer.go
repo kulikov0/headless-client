@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pion/ice/v4"
+	"github.com/kulikov0/headless-client/internal/ice"
 	"github.com/pion/logging"
 	"github.com/pion/stun/v3"
 )

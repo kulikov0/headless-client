@@ -8,8 +8,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/kulikov0/headless-client/webrtc/pkg/media"
 	"github.com/pion/rtp"
-	"github.com/kulikov0/headlessclient/webrtc/pkg/media"
 )
 
 // SampleBuilder buffers packets until media frames are complete.

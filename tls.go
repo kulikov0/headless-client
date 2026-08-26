@@ -1,4 +1,4 @@
-package headlessclient
+package headless
 
 import (
 	"compress/flate"
@@ -15,9 +15,9 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
-	http1 "github.com/kulikov0/headlessclient/internal/chromehttp1"
-	http2 "github.com/kulikov0/headlessclient/internal/chromehttp2"
-	"github.com/kulikov0/headlessclient/websocket"
+	http1 "github.com/kulikov0/headless-client/internal/chromehttp1"
+	http2 "github.com/kulikov0/headless-client/internal/chromehttp2"
+	"github.com/kulikov0/headless-client/websocket"
 	utls "github.com/refraction-networking/utls"
 )
 

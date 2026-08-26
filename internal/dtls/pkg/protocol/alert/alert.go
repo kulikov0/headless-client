@@ -7,8 +7,8 @@ package alert
 import (
 	"fmt"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 )
 
 // Level is the level of the TLS Alert.

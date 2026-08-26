@@ -10,10 +10,10 @@ import (
 	"hash"
 	"slices"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite/types"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/clientcertificate"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite/types"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/clientcertificate"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
 // CipherSuite is the interface that all DTLS CipherSuites satisfy. The public

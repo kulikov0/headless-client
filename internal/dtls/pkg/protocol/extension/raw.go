@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 )
 
 // Type is the two-byte value assigned to a TLS extension by IANA.

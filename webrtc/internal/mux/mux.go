@@ -10,7 +10,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/pion/ice/v4"
+	"github.com/kulikov0/headless-client/internal/ice"
 	"github.com/pion/logging"
 	"github.com/pion/transport/v4/packetio"
 )

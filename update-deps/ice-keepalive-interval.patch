@@ -1,0 +1,13 @@
+--- a/agent.go
++++ b/agent.go
+@@ -706,7 +706,9 @@
+ 		case ConnectionStateNew, ConnectionStateChecking: // While connecting, check candidates more frequently
+ 			updateInterval(a.checkInterval)
+ 		case ConnectionStateConnected, ConnectionStateDisconnected:
+-			updateInterval(a.keepaliveInterval)
++			if a.keepaliveInterval != 0 {
++				interval = a.keepaliveInterval
++			}
+ 		default:
+ 		}
+ 		// Ensure we run our task loop as quickly as the minimum of our various configured timeouts

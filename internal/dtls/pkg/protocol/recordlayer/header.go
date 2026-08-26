@@ -6,9 +6,9 @@ package recordlayer
 import (
 	"encoding/binary"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/util"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/util"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 )
 
 // Header implements a TLS RecordLayer header.

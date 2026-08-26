@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kulikov0/headless-client/webrtc/pkg/rtcerr"
 	"github.com/pion/datachannel"
 	"github.com/pion/logging"
 	"github.com/pion/sctp"
-	"github.com/kulikov0/headlessclient/webrtc/pkg/rtcerr"
 )
 
 const sctpMaxChannels = uint16(65535)

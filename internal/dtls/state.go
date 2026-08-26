@@ -8,13 +8,13 @@ import (
 	"encoding/gob"
 	"sync/atomic"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite"
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
-	dtlsutil "github.com/kulikov0/headlessclient/internal/dtls/internal/util"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/prf"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	dtlsstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
+	dtlsutil "github.com/kulikov0/headless-client/internal/dtls/internal/util"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/prf"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 )
 
 // State holds the dtls connection state and implements both encoding.BinaryMarshaler and

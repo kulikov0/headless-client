@@ -14,13 +14,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/internal/ciphersuite"
-	dtlsconfig "github.com/kulikov0/headlessclient/internal/dtls/internal/config"
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	dtlsstate "github.com/kulikov0/headlessclient/internal/dtls/internal/state"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/signaturehash"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite"
+	dtlsconfig "github.com/kulikov0/headless-client/internal/dtls/internal/config"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	dtlsstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signaturehash"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 	"github.com/pion/logging"
 )
 

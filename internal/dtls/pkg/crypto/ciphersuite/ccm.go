@@ -6,8 +6,8 @@ package ciphersuite
 import (
 	"crypto/aes"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/ccm"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ccm"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
 // CCMTagLen is the length of Authentication Tag.

@@ -1,6 +1,6 @@
 //go:build unix
 
-package headlessclient
+package headless
 
 import (
 	"context"

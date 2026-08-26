@@ -6,7 +6,7 @@ UD="$REPO/update-deps"
 VERSION="${1:-v1.5.3}"
 DST="$REPO/websocket"
 OLD="github.com/gorilla/websocket"
-NEW="github.com/kulikov0/headlessclient/websocket"
+NEW="github.com/kulikov0/headless-client/websocket"
 
 go -C "$REPO" mod download "$OLD@$VERSION"
 SRC="$(go env GOMODCACHE)/$OLD@$VERSION"

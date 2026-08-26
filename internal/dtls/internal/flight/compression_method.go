@@ -3,7 +3,7 @@
 
 package flight
 
-import "github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
+import "github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 
 // DefaultCompressionMethods returns the supported compression methods.
 func DefaultCompressionMethods() []*protocol.CompressionMethod {

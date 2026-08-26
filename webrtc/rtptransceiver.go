@@ -11,9 +11,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/kulikov0/headless-client/webrtc/internal/fmtp"
 	"github.com/pion/rtp"
 	"github.com/pion/sdp/v3"
-	"github.com/kulikov0/headlessclient/webrtc/internal/fmtp"
 )
 
 // RTPTransceiver represents a combination of an RTPSender and an RTPReceiver that share a common mid.

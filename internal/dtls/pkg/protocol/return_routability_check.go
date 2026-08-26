@@ -3,7 +3,7 @@
 
 package protocol
 
-import dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+import dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 
 // ReturnRoutabilityCheckMessageType identifies an RFC 9853 RRC message.
 type ReturnRoutabilityCheckMessageType uint8

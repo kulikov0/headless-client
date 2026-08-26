@@ -14,12 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kulikov0/headless-client/webrtc/internal/util"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/srtp/v3"
-	"github.com/kulikov0/headlessclient/webrtc/internal/util"
 )
 
 // trackStreams maintains a mapping of RTP/RTCP streams to a specific track

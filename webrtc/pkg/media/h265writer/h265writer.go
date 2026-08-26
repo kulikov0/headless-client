@@ -10,9 +10,9 @@ import (
 	"io"
 	"os"
 
+	"github.com/kulikov0/headless-client/webrtc/pkg/media/h265reader"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
-	"github.com/kulikov0/headlessclient/webrtc/pkg/media/h265reader"
 )
 
 const (

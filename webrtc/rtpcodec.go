@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kulikov0/headlessclient/webrtc/internal/fmtp"
+	"github.com/kulikov0/headless-client/webrtc/internal/fmtp"
 )
 
 // RTPCodecType determines the type of a codec.

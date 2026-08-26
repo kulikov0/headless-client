@@ -21,7 +21,7 @@ import (
 	"encoding/binary"
 	"math"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 )
 
 // ccm represents a Counter with CBC-MAC with a specific key.

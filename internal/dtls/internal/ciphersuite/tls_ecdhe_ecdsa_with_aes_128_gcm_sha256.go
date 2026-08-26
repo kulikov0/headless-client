@@ -9,11 +9,11 @@ import (
 	"hash"
 	"sync/atomic"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/ciphersuite"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/clientcertificate"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/prf"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/clientcertificate"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/prf"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
 // TLSEcdheEcdsaWithAes128GcmSha256  represents a TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 CipherSuite.

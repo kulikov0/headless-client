@@ -17,11 +17,11 @@ import (
 	"math/big"
 	"time"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/hash"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/signature"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/signaturehash"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/hash"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signature"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signaturehash"
 )
 
 type ecdsaSignature struct {

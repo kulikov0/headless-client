@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kulikov0/headless-client/webrtc/internal/util"
+	"github.com/kulikov0/headless-client/webrtc/pkg/media"
 	"github.com/pion/rtp"
-	"github.com/kulikov0/headlessclient/webrtc/internal/util"
-	"github.com/kulikov0/headlessclient/webrtc/pkg/media"
 )
 
 // trackBinding is a single bind for a Track

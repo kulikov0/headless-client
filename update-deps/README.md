@@ -4,8 +4,8 @@ Scripts that regenerate the vendored packages in this module. A vendored
 package is a copy of a third-party module with its import paths rewritten to a
 path inside this module.
 
-Do not edit internal/dtls, internal/chromehttp2, webrtc, or websocket by hand.
-Run the scripts.
+Do not edit internal/dtls, internal/ice, internal/chromehttp2, webrtc, or
+websocket by hand. Run the scripts.
 
 internal/chromehttp1 is not vendored. Edit it directly. See
 "internal/chromehttp1".
@@ -13,9 +13,10 @@ internal/chromehttp1 is not vendored. Edit it directly. See
 ## Packages
 
 - internal/dtls: a fork of github.com/pion/dtls/v3 with DTLS 1.3.
-- webrtc: github.com/pion/webrtc/v4 with its dtls import pointed at
-  internal/dtls. No other change. It is at the top level because consumers
-  import it.
+- internal/ice: github.com/pion/ice/v4 with the keepalive interval patch.
+- webrtc: github.com/pion/webrtc/v4 with its dtls and ice imports pointed at
+  internal/dtls and internal/ice. No other change. It is at the top level
+  because consumers import it.
 - internal/chromehttp2: the http2, internal/httpcommon, and internal/httpsfv
   packages of golang.org/x/net, with the HTTP/2 fingerprint patch.
 - websocket: github.com/gorilla/websocket with the Chrome handshake patch. It is
@@ -57,22 +58,38 @@ source without it produce the same result.
 
 To move to a newer upstream commit, change COMMIT in the script and run it.
 
+## ice.sh
+
+    ./update-deps/ice.sh [version]
+
+Default version: v4.2.2.
+
+Steps:
+
+1. Download the module and copy it to internal/ice.
+2. Remove .git at any depth, .github, go.mod, go.sum, tests, testdata,
+   examples, e2e, README.md, codecov.yml, and renovate.json.
+3. Rewrite github.com/pion/ice/v4 to the internal path.
+4. Apply ice-keepalive-interval.patch.
+5. Build internal/ice.
+
 ## webrtc.sh
 
     ./update-deps/webrtc.sh [version]
 
 Default version: v4.2.11.
 
-Run dtls.sh first. The build step of this script compiles webrtc, which imports
-internal/dtls.
+Run dtls.sh and ice.sh first. The build step of this script compiles webrtc,
+which imports internal/dtls and internal/ice.
 
 Steps:
 
 1. Download the module and copy it to webrtc.
 2. Remove .git at any depth, .github, go.mod, go.sum, tests, testdata,
    examples, e2e, README.md, codecov.yml, and renovate.json.
-3. Rewrite github.com/pion/webrtc/v4 to the webrtc path and
-   github.com/pion/dtls/v3 to internal/dtls.
+3. Rewrite github.com/pion/webrtc/v4 to the webrtc path,
+   github.com/pion/dtls/v3 to internal/dtls, and github.com/pion/ice/v4 to
+   internal/ice.
 4. Build webrtc.
 
 ## chromehttp2.sh
@@ -133,10 +150,19 @@ header order. Sec-Websocket-Extensions is removed from the forbidden-header
 list, so a caller can set Chrome's permessage-deflate parameters. Applied by
 websocket.sh.
 
+The guards are TestVendoredWebSocketWritesTheChromeHeaderOrder and
+TestVendoredWebSocketCarriesTheProfileExtensions in websocket_vendor_test.go.
+They dial a local listener, read the upgrade request off the socket, and check
+the header order against pairs that alphabetical order would swap.
+
 ## dtls-default-version.patch
 
 Changes NormalizeProtocolVersionRange in internal/dtls. An unset maximum
-version becomes DTLS 1.3 instead of DTLS 1.2. Applied by dtls.sh.
+version becomes DTLS 1.3 instead of DTLS 1.2, so the ClientHello offers both
+versions the way a browser does. Applied by dtls.sh.
+
+The guard is TestVendoredDTLSOffersBothProtocolVersions in dtls_vendor_test.go.
+It runs a loopback handshake and reads supported_versions off the ClientHello.
 
 ## dtls-dualstack-server-prime.patch
 
@@ -149,6 +175,22 @@ a context deadline. The patch adds the same postSetup call that upstream
 already uses for the client.
 
 Applied by dtls.sh. Not in upstream as of pion/dtls commit 1211026.
+
+The guard is TestVendoredDTLSCompletesADualStackHandshake in
+dtls_vendor_test.go. Without the patch the server side of that handshake ends
+in a context deadline.
+
+## ice-keepalive-interval.patch
+
+Changes the task loop in internal/ice/agent.go. Upstream passes the keepalive
+interval to updateInterval, which only lowers the loop tick. The loop starts at
+the 2 s package default, so a keepalive above 2 s is discarded and
+SetICETimeouts does not change the ping cadence. The patch assigns the interval
+directly in the connected and disconnected cases.
+
+Applied by ice.sh. The guard is TestVendoredICEKeepsTheKeepaliveIntervalPatch in
+ice_test.go. It reads the vendored source, because ice.sh deletes every test
+file in internal/ice.
 
 ## chromehttp2-fingerprint.patch
 
@@ -179,5 +221,6 @@ The scripts regenerate source. Module versions are in go.mod. If a new upstream
 version needs a newer dependency, the build fails with an undefined symbol. Run
 go get for that dependency, then run the script again.
 
-webrtc v4.2.11 needs github.com/pion/ice/v4 v4.2.2 and github.com/pion/sctp
-v1.9.4.
+webrtc v4.2.11 needs github.com/pion/sctp v1.9.4 and ice v4.2.2. ice is vendored
+rather than downloaded, so its version lives in the VERSION variable of ice.sh
+and not in go.mod.

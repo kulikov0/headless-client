@@ -1,4 +1,4 @@
-package headlessclient
+package headless
 
 import (
 	"bytes"
@@ -6,12 +6,12 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/elliptic"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension/dtls12"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension/dtls13"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension/dtls12"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension/dtls13"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 )
 
 func pionDefaultClientHello(randomByte byte) handshake.MessageClientHello {
@@ -178,6 +178,34 @@ func TestDTLS13Mimicry(t *testing.T) {
 
 	if _, err := output.Marshal(); err != nil {
 		t.Fatalf("marshal mimic client hello: %v", err)
+	}
+}
+
+func TestDTLS13MimicryReplacesTheShuffleAndGREASE(t *testing.T) {
+	profile := ChromeWindows.WithDTLS13Mimicry()
+
+	if !profile.dtls13Mimic {
+		t.Fatal("WithDTLS13Mimicry did not set the mimicry flag")
+	}
+	if profile.dtlsShuffle || profile.dtlsGREASE {
+		t.Fatalf("shuffle=%v grease=%v, applyWebRTC installs one client hello hook and the mimicry branch returns before the shuffle branch",
+			profile.dtlsShuffle, profile.dtlsGREASE)
+	}
+
+	distinctOrders := map[string]bool{}
+	for seed := byte(1); seed <= 20; seed++ {
+		order := extensionOrder(profile.dtls13MimicHook(pionDefaultClientHello(seed)))
+		distinctOrders[fmt.Sprint(order)] = true
+		for _, extensionType := range order {
+			for _, greaseValue := range greaseValues {
+				if uint16(extensionType) == greaseValue {
+					t.Fatalf("mimicry emitted GREASE extension %#04x, chrome does not GREASE its DTLS 1.3 hello", greaseValue)
+				}
+			}
+		}
+	}
+	if len(distinctOrders) != 1 {
+		t.Fatalf("mimicry produced %d distinct extension orders, it must emit the fixed chrome order and never shuffle", len(distinctOrders))
 	}
 }
 

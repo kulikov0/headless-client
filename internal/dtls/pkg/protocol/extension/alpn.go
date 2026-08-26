@@ -6,7 +6,7 @@ package extension
 import (
 	"slices"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 )
 
 // ALPNProtocolSelection negotiates a shared protocol according to #3.2 of rfc7301.

@@ -4,8 +4,8 @@
 package flight12
 
 import (
-	dtlsflight "github.com/kulikov0/headlessclient/internal/dtls/internal/flight"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
+	dtlsflight "github.com/kulikov0/headless-client/internal/dtls/internal/flight"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 )
 
 // handshakeRulesThroughClientKeyExchange returns the handshake transcript pull

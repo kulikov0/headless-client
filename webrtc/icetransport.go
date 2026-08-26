@@ -12,10 +12,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pion/ice/v4"
+	"github.com/kulikov0/headless-client/internal/ice"
+	"github.com/kulikov0/headless-client/webrtc/internal/mux"
+	"github.com/kulikov0/headless-client/webrtc/internal/util"
 	"github.com/pion/logging"
-	"github.com/kulikov0/headlessclient/webrtc/internal/mux"
-	"github.com/kulikov0/headlessclient/webrtc/internal/util"
 )
 
 // ICETransport allows an application access to information about the ICE

@@ -4,8 +4,8 @@
 package ciphersuite
 
 import (
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/ciphersuite"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/clientcertificate"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/clientcertificate"
 )
 
 // NewTLSPskWithAes128Ccm returns the TLS_PSK_WITH_AES_128_CCM CipherSuite.

@@ -32,7 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kulikov0/headlessclient/internal/chromehttp2/internal/httpcommon"
+	"github.com/kulikov0/headless-client/internal/chromehttp2/internal/httpcommon"
 	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/http2/hpack"
 )

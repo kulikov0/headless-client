@@ -18,15 +18,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kulikov0/headlessclient/internal/dtls"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/fingerprint"
+	"github.com/kulikov0/headless-client/internal/dtls"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/fingerprint"
+	"github.com/kulikov0/headless-client/webrtc/internal/mux"
+	"github.com/kulikov0/headless-client/webrtc/internal/util"
+	"github.com/kulikov0/headless-client/webrtc/pkg/rtcerr"
 	"github.com/pion/interceptor"
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/srtp/v3"
-	"github.com/kulikov0/headlessclient/webrtc/internal/mux"
-	"github.com/kulikov0/headlessclient/webrtc/internal/util"
-	"github.com/kulikov0/headlessclient/webrtc/pkg/rtcerr"
 )
 
 // DTLSTransport allows an application access to information about the DTLS

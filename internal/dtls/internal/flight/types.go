@@ -7,8 +7,8 @@ import (
 	"context"
 	"crypto"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
 type Conn interface {

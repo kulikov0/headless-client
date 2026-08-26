@@ -3,7 +3,7 @@
 
 package config
 
-import "github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol"
+import "github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 
 // NormalizeProtocolVersionRange constrains the version range to supported DTLS versions.
 func NormalizeProtocolVersionRange(

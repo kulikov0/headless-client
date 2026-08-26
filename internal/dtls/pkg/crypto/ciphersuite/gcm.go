@@ -7,7 +7,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/recordlayer"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
 const (

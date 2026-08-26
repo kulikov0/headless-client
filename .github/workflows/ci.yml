@@ -15,7 +15,7 @@ jobs:
           go-version-file: go.mod
       - name: gofmt
         run: |
-          unformatted="$(gofmt -l . | grep -v '^internal/dtls/' | grep -v '^internal/chromehttp2/' | grep -v '^webrtc/' | grep -v '^websocket/' || true)"
+          unformatted="$(gofmt -l . | grep -v '^internal/dtls/' | grep -v '^internal/ice/' | grep -v '^internal/chromehttp2/' | grep -v '^webrtc/' | grep -v '^websocket/' || true)"
           if [ -n "$unformatted" ]; then
             echo "$unformatted"
             exit 1

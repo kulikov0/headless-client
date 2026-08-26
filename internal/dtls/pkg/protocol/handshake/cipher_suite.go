@@ -6,7 +6,7 @@ package handshake
 import (
 	"encoding/binary"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 )
 
 func decodeCipherSuiteIDs(buf []byte) ([]uint16, error) {

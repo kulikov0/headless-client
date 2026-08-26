@@ -7,7 +7,7 @@ UD="$REPO/update-deps"
 UPSTREAM="https://github.com/pion/dtls"
 COMMIT="66a287946ee8b903d9689a56ff789c1b31613b74"
 OLD="github.com/pion/dtls/v3"
-NEW="github.com/kulikov0/headlessclient/internal/dtls"
+NEW="github.com/kulikov0/headless-client/internal/dtls"
 
 SRC="${1:-}"
 SOURCE_LABEL="$UPSTREAM"

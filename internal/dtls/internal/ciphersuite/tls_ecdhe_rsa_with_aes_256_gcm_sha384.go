@@ -3,7 +3,7 @@
 
 package ciphersuite
 
-import "github.com/kulikov0/headlessclient/internal/dtls/pkg/crypto/clientcertificate"
+import "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/clientcertificate"
 
 // TLSEcdheRsaWithAes256GcmSha384 implements the TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 CipherSuite.
 type TLSEcdheRsaWithAes256GcmSha384 struct {

@@ -1,14 +1,14 @@
-package headlessclient
+package headless
 
 import (
 	"encoding/binary"
 	"math/rand"
 	"time"
 
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/extension/dtls13"
-	"github.com/kulikov0/headlessclient/internal/dtls/pkg/protocol/handshake"
-	"github.com/kulikov0/headlessclient/webrtc"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension/dtls13"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
+	"github.com/kulikov0/headless-client/webrtc"
 )
 
 var greaseValues = [...]uint16{
@@ -61,10 +61,17 @@ const (
 	pionDefaultICEFailedTimeout       = 25 * time.Second
 )
 
-func (p Profile) ApplyWebRTC(settingEngine *webrtc.SettingEngine) {
-	if settingEngine == nil {
-		return
+func (p Profile) SettingEngine() (webrtc.SettingEngine, error) {
+	settingEngine := webrtc.SettingEngine{}
+	p.applyWebRTC(&settingEngine)
+	if err := p.applyICECredentials(&settingEngine); err != nil {
+		return webrtc.SettingEngine{}, err
 	}
+
+	return settingEngine, nil
+}
+
+func (p Profile) applyWebRTC(settingEngine *webrtc.SettingEngine) {
 	settingEngine.SetSRTPProtectionProfiles(chromeSRTPProtectionProfiles...)
 	settingEngine.SetICETimeouts(pionDefaultICEDisconnectedTimeout, pionDefaultICEFailedTimeout, chromeICEKeepaliveInterval)
 	settingEngine.SetDTLSServerHelloMessageHook(p.dtlsServerHelloHook)

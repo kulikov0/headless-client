@@ -10,7 +10,7 @@ import (
 	"crypto/rand"
 	"fmt"
 
-	dtlserrors "github.com/kulikov0/headlessclient/internal/dtls/internal/errors"
+	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 )
 
 // X25519KeySize is the size in bytes of an X25519 public key, private key, or

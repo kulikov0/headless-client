@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kulikov0/headless-client/webrtc/internal/fmtp"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/sdp/v3"
-	"github.com/kulikov0/headlessclient/webrtc/internal/fmtp"
 )
 
 type mediaEngineHeaderExtension struct {
