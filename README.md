@@ -45,14 +45,17 @@ The package is named `headless`.
 
 ## What it covers
 
-- TLS: Chrome ClientHello through utls, post-quantum signature algorithms.
+- TLS: Chrome ClientHello through utls, post-quantum signature algorithms,
+  session resumption with the pre_shared_key extension.
 - HTTP/1.1 and HTTP/2: header order per request destination, Chrome SETTINGS and
   window sizes, pseudo-header order, the RFC 9218 priority header, a connection
   pool with Chrome's per-host limit and idle timeout.
 - Headers: user agent, client hints, Accept, Accept-Encoding, Sec-Fetch-*.
 - WebSocket: the Chrome upgrade handshake.
-- WebRTC: DTLS ClientHello shuffling and GREASE, optional DTLS 1.3 mimicry, SRTP
-  profile order, ICE credential shape, ICE keepalive interval.
+- WebRTC: DTLS ClientHello shuffling and GREASE, optional DTLS 1.3 mimicry,
+  ServerHello extension order on both DTLS versions, no HelloVerifyRequest,
+  handshake fragments sized so the datagram fills the MTU, SRTP profile order,
+  ICE credential shape, ICE keepalive interval.
 - TCP: keepalive disabled, as in Chrome.
 
 ## Usage
@@ -209,13 +212,6 @@ The following gaps are scheduled. Gaps that will not be addressed are under
   Chromium source. The code branch that produces it is confirmed. The Windows
   spelling is not.
 
-### TLS
-
-- No TLS session cache is set, so every connection performs a full handshake.
-  Chrome produces a second JA4 per host for resumed connections, with one
-  additional extension, `pre_shared_key`. This library never produces that
-  variant.
-
 ### WebRTC
 
 - The SDP has pion's shape. The CNAME is derived from the stream ID, where
@@ -225,11 +221,6 @@ The following gaps are scheduled. Gaps that will not be addressed are under
 - No STUN keepalive is sent to the STUN server. Chrome sends one every 10 s in
   addition to the peer keepalive. Over a 170 s capture this library sent two
   packets to its STUN servers, both during gathering, and nothing after.
-- The DTLS ClientHello is fragmented at a different boundary. Chrome sizes the
-  first fragment so that the datagram is 1200 bytes. pion applies its MTU to the
-  handshake payload and then adds the record and handshake headers. For the same
-  1413 byte ClientHello Chrome sends datagrams of 1208 and 271 bytes, and this
-  library sends 1233 and 246.
 - RTCP feedback format and cadence have not been audited.
 - The ICE candidate priority is one number that packs the candidate type, a
   local preference and the component. pion always writes 65535 as the local
