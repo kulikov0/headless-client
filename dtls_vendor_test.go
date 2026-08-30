@@ -4,19 +4,53 @@ import (
 	"context"
 	"net"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kulikov0/headless-client/internal/dtls"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/selfsign"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension/dtls13"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 )
 
 const vendorHandshakeTimeout = 10 * time.Second
 
-func dtlsLoopbackClientHello(t *testing.T, serverOptions ...dtls.ServerOption) handshake.MessageClientHello {
+type recordingPacketConn struct {
+	net.PacketConn
+	mutex sync.Mutex
+	sizes []int
+}
+
+func (conn *recordingPacketConn) WriteTo(payload []byte, address net.Addr) (int, error) {
+	conn.mutex.Lock()
+	conn.sizes = append(conn.sizes, len(payload))
+	conn.mutex.Unlock()
+
+	return conn.PacketConn.WriteTo(payload, address)
+}
+
+func (conn *recordingPacketConn) writtenSizes() []int {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	return slices.Clone(conn.sizes)
+}
+
+type dtlsLoopbackResult struct {
+	clientHello         handshake.MessageClientHello
+	serverHello         handshake.MessageServerHello
+	serverHelloHooked   bool
+	clientDatagramSizes []int
+}
+
+func runDTLSLoopback(
+	t *testing.T,
+	clientOptions []dtls.ClientOption,
+	serverOptions []dtls.ServerOption,
+) dtlsLoopbackResult {
 	t.Helper()
 
 	certificate, err := selfsign.GenerateSelfSigned()
@@ -30,19 +64,32 @@ func dtlsLoopbackClientHello(t *testing.T, serverOptions ...dtls.ServerOption) h
 	}
 	defer serverPacketConnection.Close()
 
-	clientPacketConnection, err := net.ListenPacket("udp", "127.0.0.1:0")
+	rawClientPacketConnection, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("client listen: %v", err)
 	}
-	defer clientPacketConnection.Close()
+	defer rawClientPacketConnection.Close()
+	clientPacketConnection := &recordingPacketConn{PacketConn: rawClientPacketConnection}
 
 	handshakeContext, cancel := context.WithTimeout(context.Background(), vendorHandshakeTimeout)
 	defer cancel()
 
+	capturedServerHello := make(chan handshake.MessageServerHello, 4)
 	serverDone := make(chan error, 1)
 	go func() {
+		options := []dtls.ServerOption{
+			dtls.WithCertificates(certificate),
+			dtls.WithServerHelloMessageHook(func(serverHello handshake.MessageServerHello) handshake.Message {
+				select {
+				case capturedServerHello <- serverHello:
+				default:
+				}
+
+				return &serverHello
+			}),
+		}
 		connection, serverErr := dtls.ServerWithOptions(serverPacketConnection, clientPacketConnection.LocalAddr(),
-			append([]dtls.ServerOption{dtls.WithCertificates(certificate)}, serverOptions...)...,
+			append(options, serverOptions...)...,
 		)
 		if serverErr != nil {
 			serverDone <- serverErr
@@ -53,19 +100,22 @@ func dtlsLoopbackClientHello(t *testing.T, serverOptions ...dtls.ServerOption) h
 		serverDone <- connection.HandshakeContext(handshakeContext)
 	}()
 
-	captured := make(chan handshake.MessageClientHello, 4)
+	capturedClientHello := make(chan handshake.MessageClientHello, 4)
 	clientDone := make(chan error, 1)
 	go func() {
-		connection, clientErr := dtls.ClientWithOptions(clientPacketConnection, serverPacketConnection.LocalAddr(),
+		options := []dtls.ClientOption{
 			dtls.WithInsecureSkipVerify(true),
 			dtls.WithClientHelloMessageHook(func(clientHello handshake.MessageClientHello) handshake.Message {
 				select {
-				case captured <- clientHello:
+				case capturedClientHello <- clientHello:
 				default:
 				}
 
 				return &clientHello
 			}),
+		}
+		connection, clientErr := dtls.ClientWithOptions(clientPacketConnection, serverPacketConnection.LocalAddr(),
+			append(options, clientOptions...)...,
 		)
 		if clientErr != nil {
 			clientDone <- clientErr
@@ -90,14 +140,25 @@ func dtlsLoopbackClientHello(t *testing.T, serverOptions ...dtls.ServerOption) h
 		}
 	}
 
+	result := dtlsLoopbackResult{clientDatagramSizes: clientPacketConnection.writtenSizes()}
 	select {
-	case clientHello := <-captured:
-		return clientHello
+	case result.clientHello = <-capturedClientHello:
 	default:
 		t.Fatal("the handshake completed without a client hello reaching the hook")
 	}
+	select {
+	case result.serverHello = <-capturedServerHello:
+		result.serverHelloHooked = true
+	default:
+	}
 
-	return handshake.MessageClientHello{}
+	return result
+}
+
+func dtlsLoopbackClientHello(t *testing.T, serverOptions ...dtls.ServerOption) handshake.MessageClientHello {
+	t.Helper()
+
+	return runDTLSLoopback(t, nil, serverOptions).clientHello
 }
 
 func TestVendoredDTLSCompletesADualStackHandshake(t *testing.T) {
@@ -125,4 +186,52 @@ func TestVendoredDTLSOffersBothProtocolVersions(t *testing.T) {
 
 func TestVendoredDTLSFallsBackToVersion12(t *testing.T) {
 	dtlsLoopbackClientHello(t, dtls.WithMaxVersion(protocol.Version1_2))
+}
+
+func TestVendoredDTLSCallsTheServerHelloHookOnVersion13(t *testing.T) {
+	result := runDTLSLoopback(t, nil, nil)
+
+	if !result.serverHelloHooked {
+		t.Fatal("the server hello hook never ran, so dtls-serverhello13-hook.patch was lost and every 1.3 server hello ships the pion extension order")
+	}
+	if !offersExtension(result.serverHello.Extensions, extension.TypeSupportedVersions) {
+		t.Fatalf("the hooked server hello carries %v, a 1.3 server hello carries supported_versions; the loopback negotiated 1.2 and this guard proved nothing", serverHelloExtensionOrder(&result.serverHello))
+	}
+}
+
+func TestVendoredDTLSFillsTheHandshakeDatagramToTheMTU(t *testing.T) {
+	const maximumTransmissionUnit = 200
+
+	certificate, err := selfsign.GenerateSelfSigned()
+	if err != nil {
+		t.Fatalf("self signed certificate: %v", err)
+	}
+	cases := []struct {
+		name          string
+		clientOptions []dtls.ClientOption
+		serverOptions []dtls.ServerOption
+	}{
+		{
+			"plaintext client hello",
+			[]dtls.ClientOption{dtls.WithMTU(maximumTransmissionUnit)},
+			nil,
+		},
+		{
+			"encrypted client certificate",
+			[]dtls.ClientOption{dtls.WithMTU(maximumTransmissionUnit), dtls.WithCertificates(certificate)},
+			[]dtls.ServerOption{dtls.WithClientAuth(dtls.RequireAnyClientCert)},
+		},
+	}
+	for _, testCase := range cases {
+		result := runDTLSLoopback(t, testCase.clientOptions, testCase.serverOptions)
+
+		for _, size := range result.clientDatagramSizes {
+			if size > maximumTransmissionUnit {
+				t.Fatalf("%s: a client datagram is %d bytes against an MTU of %d, so the record overhead was added on top of a full fragment and dtls-handshake-fragment-mtu.patch was lost; sizes %v", testCase.name, size, maximumTransmissionUnit, result.clientDatagramSizes)
+			}
+		}
+		if !slices.Contains(result.clientDatagramSizes, maximumTransmissionUnit) {
+			t.Fatalf("%s: no client datagram reached the MTU of %d, chrome sizes the first fragment so the datagram is exactly the MTU; sizes %v", testCase.name, maximumTransmissionUnit, result.clientDatagramSizes)
+		}
+	}
 }

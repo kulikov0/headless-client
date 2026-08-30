@@ -66,6 +66,8 @@ cp "$UD"/_dtls-files/*.go "$DST/"
 
 apply_patch "$UD/dtls-default-version.patch"
 apply_patch "$UD/dtls-dualstack-server-prime.patch"
+apply_patch "$UD/dtls-handshake-fragment-mtu.patch"
+apply_patch "$UD/dtls-serverhello13-hook.patch"
 
 if grep -rq "$OLD" "$DST" --include='*.go'; then
   echo "residual $OLD references remain" >&2

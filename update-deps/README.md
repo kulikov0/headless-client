@@ -46,7 +46,8 @@ Steps:
    examples, e2e, README.md, codecov.yml, and renovate.json.
 3. Rewrite github.com/pion/dtls/v3 to the internal path.
 4. Copy the files from _dtls-files.
-5. Apply dtls-default-version.patch and dtls-dualstack-server-prime.patch.
+5. Apply dtls-default-version.patch, dtls-dualstack-server-prime.patch,
+   dtls-handshake-fragment-mtu.patch and dtls-serverhello13-hook.patch.
 6. Build internal/dtls.
 
 Changes this module makes on top of upstream are stored in update-deps, not in

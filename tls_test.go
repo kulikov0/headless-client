@@ -3,12 +3,14 @@ package headless
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,7 +20,7 @@ import (
 
 func specSignatureAlgorithms(t *testing.T, profile Profile, alpnOverride []string) []utls.SignatureScheme {
 	t.Helper()
-	spec, err := profile.clientHelloSpec(alpnOverride)
+	spec, err := profile.clientHelloSpec(alpnOverride, false)
 	if err != nil {
 		t.Fatalf("clientHelloSpec: %v", err)
 	}
@@ -63,7 +65,7 @@ func TestNonChromeParrotKeepsItsOwnSignatureAlgorithms(t *testing.T) {
 }
 
 func TestSignatureAlgorithmsAreNotDuplicated(t *testing.T) {
-	spec, err := ChromeWindows.clientHelloSpec(nil)
+	spec, err := ChromeWindows.clientHelloSpec(nil, false)
 	if err != nil {
 		t.Fatalf("clientHelloSpec: %v", err)
 	}
@@ -77,7 +79,7 @@ func TestSignatureAlgorithmsAreNotDuplicated(t *testing.T) {
 	}
 }
 
-func dialWithOptions(t *testing.T, address string, options TLSOptions) []byte {
+func dialWithOptions(t *testing.T, address string, options TLSOptions, sessionCache utls.ClientSessionCache) []byte {
 	t.Helper()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -120,7 +122,7 @@ func dialWithOptions(t *testing.T, address string, options TLSOptions) []byte {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, err := ChromeWindows.dialTLS(ctx, "tcp", address, nil, nil, options)
+	conn, err := ChromeWindows.dialTLS(ctx, "tcp", address, nil, nil, sessionCache, options)
 	if err == nil {
 		conn.Close()
 	}
@@ -145,7 +147,7 @@ func TestDialContextReceivesTheOriginalAddress(t *testing.T) {
 			return nil, io.EOF
 		},
 	}
-	if _, err := ChromeWindows.dialTLS(context.Background(), "tcp", "example.com:443", nil, nil, options); err == nil {
+	if _, err := ChromeWindows.dialTLS(context.Background(), "tcp", "example.com:443", nil, nil, nil, options); err == nil {
 		t.Fatal("dial error must surface")
 	}
 	if seen != "example.com:443" {
@@ -154,12 +156,12 @@ func TestDialContextReceivesTheOriginalAddress(t *testing.T) {
 }
 
 func TestServerNameOverrideReachesTheClientHello(t *testing.T) {
-	hello := dialWithOptions(t, "10.0.0.1:443", TLSOptions{ServerName: "example.com"})
+	hello := dialWithOptions(t, "10.0.0.1:443", TLSOptions{ServerName: "example.com"}, nil)
 	if !bytes.Contains(hello, []byte("example.com")) {
 		t.Fatal("server name override missing from the client hello")
 	}
 
-	fromAddress := dialWithOptions(t, "example.com:443", TLSOptions{})
+	fromAddress := dialWithOptions(t, "example.com:443", TLSOptions{}, nil)
 	if !bytes.Contains(fromAddress, []byte("example.com")) {
 		t.Fatal("server name should fall back to the dialled address")
 	}
@@ -294,7 +296,7 @@ func TestHTTPClientSharesOnePoolPerProfile(t *testing.T) {
 }
 
 func TestWebSocketSpecDropsApplicationSettings(t *testing.T) {
-	spec, err := ChromeWindows.clientHelloSpec([]string{"http/1.1"})
+	spec, err := ChromeWindows.clientHelloSpec([]string{"http/1.1"}, false)
 	if err != nil {
 		t.Fatalf("clientHelloSpec: %v", err)
 	}
@@ -307,5 +309,97 @@ func TestWebSocketSpecDropsApplicationSettings(t *testing.T) {
 				t.Fatalf("alpn = %v, want http/1.1 only", typed.AlpnProtocols)
 			}
 		}
+	}
+}
+
+func TestTransportResumesTheTLSSessionOnANewConnection(t *testing.T) {
+	var mutex sync.Mutex
+	var resumed []bool
+	var versions []uint16
+	address, _ := countingTLSServer(t, false, func(_ http.ResponseWriter, request *http.Request) {
+		mutex.Lock()
+		resumed = append(resumed, request.TLS.DidResume)
+		versions = append(versions, request.TLS.Version)
+		mutex.Unlock()
+	})
+
+	transport := ChromeWindows.Transport(TLSOptions{
+		InsecureSkipVerify: true,
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		},
+	})
+	client := &http.Client{Transport: transport}
+	drainRequests(t, client, 1)
+	transport.(*chromeRoundTripper).CloseIdleConnections()
+	drainRequests(t, client, 1)
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	if len(resumed) != 2 {
+		t.Fatalf("the server handled %d requests, want 2", len(resumed))
+	}
+	if versions[1] != tls.VersionTLS13 {
+		t.Fatalf("the second connection negotiated 0x%04x, the resumed chrome ja4 is a 1.3 pre_shared_key handshake", versions[1])
+	}
+	if resumed[0] {
+		t.Fatal("the first connection resumed, so the fixture proves nothing")
+	}
+	if !resumed[1] {
+		t.Fatal("the second connection ran a full handshake; chrome resumes and emits a second ja4 carrying pre_shared_key, and without a session cache we never produce that variant")
+	}
+}
+
+func clientHelloExtensionTypes(t *testing.T, record []byte) []uint16 {
+	t.Helper()
+
+	if len(record) < 5+4+2+32+1 {
+		t.Fatalf("captured %d bytes, too short for a client hello", len(record))
+	}
+	body := record[5+4+2+32:]
+	body = body[1+int(body[0]):]
+	body = body[2+(int(body[0])<<8|int(body[1])):]
+	body = body[1+int(body[0]):]
+	body = body[2:]
+
+	types := make([]uint16, 0, 20)
+	for len(body) >= 4 {
+		length := int(body[2])<<8 | int(body[3])
+		if len(body) < 4+length {
+			t.Fatalf("extension %d claims %d bytes but %d remain", uint16(body[0])<<8|uint16(body[1]), length, len(body)-4)
+		}
+		types = append(types, uint16(body[0])<<8|uint16(body[1]))
+		body = body[4+length:]
+	}
+
+	return types
+}
+
+func normalizeGREASE(types []uint16) {
+	for index, value := range types {
+		if slices.Contains(greaseValues[:], value) {
+			types[index] = greaseValues[0]
+		}
+	}
+}
+
+func TestAFreshClientHelloOmitsTheEmptyPreSharedKey(t *testing.T) {
+	const preSharedKey = uint16(41)
+
+	withoutCache := dialWithOptions(t, "example.com:443", TLSOptions{}, nil)
+	withCache := dialWithOptions(t, "example.com:443", TLSOptions{}, utls.NewLRUClientSessionCache(0))
+
+	offered := clientHelloExtensionTypes(t, withCache)
+	if slices.Contains(offered, preSharedKey) {
+		t.Fatalf("a fresh client hello offers an empty pre_shared_key, chrome omits it; extensions %v", offered)
+	}
+	baseline := clientHelloExtensionTypes(t, withoutCache)
+	normalizeGREASE(offered)
+	normalizeGREASE(baseline)
+	slices.Sort(offered)
+	slices.Sort(baseline)
+	if !slices.Equal(offered, baseline) {
+		t.Fatalf("the session cache changed the extension set to %v from %v", offered, baseline)
 	}
 }

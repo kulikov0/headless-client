@@ -24,6 +24,8 @@ const (
 	trafficIVLabel13                = "iv"
 	trafficSequenceNumberKeyLabel13 = "sn"
 
+	innerPlaintextContentTypeLen = 1
+
 	tls13AEADWriteIVLen  = 12
 	tls13AES128GCMKeyLen = 16
 	tls13AES256GCMKeyLen = 32
@@ -193,6 +195,14 @@ func (r recordTrafficProtection13) sequenceNumberMask(encryptedRecord []byte) ([
 	}
 
 	return r.sequenceNumberMaskFn(r.sequenceNumberKey, encryptedRecord)
+}
+
+func (r *recordTrafficProtection13) Overhead() int {
+	if r.aead == nil {
+		return 0
+	}
+
+	return innerPlaintextContentTypeLen + r.aead.Overhead()
 }
 
 func (r *recordTrafficProtection13) Seal(

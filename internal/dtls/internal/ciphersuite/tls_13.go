@@ -36,6 +36,7 @@ type RecordProtection13 interface {
 		header recordlayer.UnifiedHeader,
 		encryptedRecord []byte,
 	) (recordlayer.UnifiedHeader, error)
+	Overhead() int
 }
 
 // TLS13CipherSuite provides behavior common to TLS 1.3 cipher suites. TLS 1.3

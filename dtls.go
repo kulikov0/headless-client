@@ -3,6 +3,7 @@ package headless
 import (
 	"encoding/binary"
 	"math/rand"
+	"slices"
 	"time"
 
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
@@ -42,6 +43,10 @@ var chromeDTLS13ExtensionOrder = []uint16{
 
 var chromeServerHelloExtensionOrder = []uint16{
 	23, 65281, 11, 14,
+}
+
+var chromeDTLS13ServerHelloExtensionOrder = []uint16{
+	51, 43,
 }
 
 // chromeICEKeepaliveInterval is measured. libwebrtc sets
@@ -86,8 +91,18 @@ func (p Profile) applyWebRTC(settingEngine *webrtc.SettingEngine) {
 }
 
 func (p Profile) dtlsServerHelloHook(serverHello handshake.MessageServerHello) handshake.Message {
-	serverHello.Extensions = orderExtensions(serverHello.Extensions, chromeServerHelloExtensionOrder)
+	order := chromeServerHelloExtensionOrder
+	if offersExtension(serverHello.Extensions, extension.TypeSupportedVersions) {
+		order = chromeDTLS13ServerHelloExtensionOrder
+	}
+	serverHello.Extensions = orderExtensions(serverHello.Extensions, order)
 	return &serverHello
+}
+
+func offersExtension(extensions []extension.Value, extensionType extension.Type) bool {
+	return slices.ContainsFunc(extensions, func(value extension.Value) bool {
+		return value.ExtensionType() == extensionType
+	})
 }
 
 func orderByCanonical[Item any, Key comparable](items []Item, canonicalOrder []Key, keyOf func(Item) Key) []Item {

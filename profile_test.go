@@ -109,7 +109,7 @@ func captureClientHello(t *testing.T, profile Profile) []byte {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, err := profile.dialTLS(ctx, "tcp", listener.Addr().String(), nil, nil, TLSOptions{})
+	conn, err := profile.dialTLS(ctx, "tcp", listener.Addr().String(), nil, nil, nil, TLSOptions{})
 	if err == nil {
 		conn.Close()
 	}

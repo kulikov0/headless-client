@@ -301,6 +301,48 @@ func TestDTLSServerHelloUsesChromeExtensionOrder(t *testing.T) {
 	}
 }
 
+func pionDefaultDTLS13ServerHello() handshake.MessageServerHello {
+	cipherSuiteID := uint16(0x1301)
+
+	return handshake.MessageServerHello{
+		Version:           protocol.Version{Major: 0xfe, Minor: 0xfd},
+		CipherSuiteID:     &cipherSuiteID,
+		CompressionMethod: protocol.CompressionMethods()[0],
+		Extensions: []extension.Value{
+			&dtls13.SelectedVersion{Version: protocol.Version1_3},
+			&dtls13.ServerKeyShare{Share: dtls13.KeyShareEntry{
+				Group:       elliptic.X25519,
+				KeyExchange: make([]byte, 32),
+			}},
+		},
+	}
+}
+
+func TestDTLSServerHelloUsesChromeExtensionOrderOnVersion13(t *testing.T) {
+	input := pionDefaultDTLS13ServerHello()
+	before := serverHelloExtensionOrder(&input)
+	if fmt.Sprint(before) != fmt.Sprint([]extension.Type{43, 51}) {
+		t.Fatalf("fixture is not the pion order, got %v", before)
+	}
+
+	output := ChromeWindows.dtlsServerHelloHook(pionDefaultDTLS13ServerHello())
+	after := serverHelloExtensionOrder(output)
+	if fmt.Sprint(after) != fmt.Sprint([]extension.Type{51, 43}) {
+		t.Fatalf("server hello order = %v, chrome sends [51 43] on every 1.3 handshake in quic-abob-new-5793519b", after)
+	}
+
+	if _, err := output.Marshal(); err != nil {
+		t.Fatalf("marshal server hello: %v", err)
+	}
+}
+
+func TestDTLSServerHelloKeepsTheVersion12OrderWhenSupportedVersionsIsAbsent(t *testing.T) {
+	after := serverHelloExtensionOrder(ChromeWindows.dtlsServerHelloHook(pionDefaultServerHello()))
+	if fmt.Sprint(after) != fmt.Sprint([]extension.Type{23, 65281, 11, 14}) {
+		t.Fatalf("server hello order = %v, a 1.2 hello must not take the 1.3 table", after)
+	}
+}
+
 func TestDTLSServerHelloKeepsUnknownExtensions(t *testing.T) {
 	input := pionDefaultServerHello()
 	input.Extensions = append(input.Extensions, greaseExtension{value: 0x3a3a})

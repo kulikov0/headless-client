@@ -1119,7 +1119,7 @@ func (c *Conn) processHandshakePacket(pkt *dtlsflight.Packet, dtlsHandshake *han
 
 	rawPackets := make([][]byte, 0)
 
-	handshakeFragments, err := c.fragmentHandshake(dtlsHandshake)
+	handshakeFragments, err := c.fragmentHandshake(dtlsHandshake, recordlayer.FixedHeaderSize)
 	if err != nil {
 		return nil, err
 	}
@@ -1226,13 +1226,18 @@ func (c *Conn) processProtectedHandshakePacketTracked(
 		return nil, dtlserrors.ErrCipherSuiteRecordProtectionNotImplemented
 	}
 
-	handshakeFragments, err := c.fragmentHandshake(dtlsHandshake)
+	epoch := pkt.Record.Header.Epoch
+	recordOverhead, err := c.protectedRecordOverhead(epoch)
+	if err != nil {
+		return nil, err
+	}
+
+	handshakeFragments, err := c.fragmentHandshake(dtlsHandshake, recordOverhead)
 	if err != nil {
 		return nil, err
 	}
 
 	rawPackets := make([]preparedRecord, 0, len(handshakeFragments))
-	epoch := pkt.Record.Header.Epoch
 	for _, handshakeFragment := range handshakeFragments {
 		selected, err := selectHandshakeFragment(pkt.HandshakeFragmentOffsets, handshakeFragment)
 		if err != nil {
@@ -1293,7 +1298,7 @@ func selectHandshakeFragment(offsets map[uint32]uint32, raw []byte) (bool, error
 	return ok && length == header.FragmentLength, nil
 }
 
-func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte, error) {
+func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake, recordOverhead int) ([][]byte, error) {
 	content, err := dtlsHandshake.Message.Marshal()
 	if err != nil {
 		return nil, err
@@ -1301,7 +1306,7 @@ func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte, 
 
 	fragmentedHandshakes := make([][]byte, 0)
 
-	contentFragments := util.SplitBytes(content, c.maximumTransmissionUnit)
+	contentFragments := util.SplitBytes(content, c.maxHandshakeFragmentLength(recordOverhead))
 	if len(contentFragments) == 0 {
 		contentFragments = [][]byte{
 			{},
@@ -1332,6 +1337,34 @@ func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte, 
 	}
 
 	return fragmentedHandshakes, nil
+}
+
+func (c *Conn) maxHandshakeFragmentLength(recordOverhead int) int {
+	available := c.maximumTransmissionUnit - recordOverhead - handshake.HeaderLength
+	if available < 1 {
+		return 1
+	}
+
+	return available
+}
+
+func (c *Conn) protectedRecordOverhead(epoch uint16) (int, error) {
+	generation, err := c.writeTrafficGeneration(epoch)
+	if err != nil {
+		return 0, err
+	}
+
+	header := recordlayer.UnifiedHeader{SeqBit: true, LengthBit: true}
+	if state13, ok := c.state.(*dtlsstate.State13); ok &&
+		state13.CID.Negotiated && state13.CID.Send.UseCID {
+		header.ConnectionID = bytes.Clone(state13.CID.Send.Active)
+	}
+	marshalled, err := header.Marshal()
+	if err != nil {
+		return 0, err
+	}
+
+	return len(marshalled) + generation.Protection.Overhead(), nil
 }
 
 var poolReadBuffer = sync.Pool{ //nolint:gochecknoglobals

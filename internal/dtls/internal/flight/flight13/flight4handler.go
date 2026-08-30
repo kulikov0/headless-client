@@ -250,10 +250,14 @@ func flight4Generate( //nolint:cyclop
 		CompressionMethod: dtlsflight.DefaultCompressionMethods()[0],
 		Extensions:        serverHelloExtensions,
 	}
+	serverHelloMessage, err = hookedServerHello(serverHelloMessage, cfg.ServerHelloMessageHook)
+	if err != nil {
+		return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
+	}
 	if _, err = serverHelloMessage.Marshal(); err != nil {
 		return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 	}
-	decision := negotiation.DecideConnectionID(offer, serverHelloExtensions)
+	decision := negotiation.DecideConnectionID(offer, serverHelloMessage.Extensions)
 
 	serverHello := &dtlsflight.Packet{
 		Record: &recordlayer.RecordLayer{
@@ -316,4 +320,28 @@ func flight4Generate( //nolint:cyclop
 	dtlsflight.CommitSRTP(state.Common, srtpDecision)
 
 	return pkts, nil, nil
+}
+
+func hookedServerHello(
+	base *handshake.MessageServerHello,
+	hook func(handshake.MessageServerHello) handshake.Message,
+) (*handshake.MessageServerHello, error) {
+	if hook == nil {
+		return base, nil
+	}
+	hooked, ok := hook(*base).(*handshake.MessageServerHello)
+	if !ok || len(hooked.Extensions) != len(base.Extensions) {
+		return nil, dtlserrors.ErrInvalidServerHello
+	}
+	for _, value := range base.Extensions {
+		extensionType := value.ExtensionType()
+		carried := slices.ContainsFunc(hooked.Extensions, func(candidate extension.Value) bool {
+			return candidate.ExtensionType() == extensionType
+		})
+		if !carried {
+			return nil, dtlserrors.ErrInvalidServerHello
+		}
+	}
+
+	return hooked, nil
 }

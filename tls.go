@@ -67,15 +67,21 @@ func (p Profile) sharedTransport() http.RoundTripper {
 }
 
 func (p Profile) Transport(options TLSOptions) http.RoundTripper {
-	return &chromeRoundTripper{profile: p, keyLog: sharedKeyLog(), options: options}
+	return &chromeRoundTripper{
+		profile:      p,
+		keyLog:       sharedKeyLog(),
+		options:      options,
+		sessionCache: utls.NewLRUClientSessionCache(0),
+	}
 }
 
 func (p Profile) WebSocketDialer(options TLSOptions) *websocket.Dialer {
 	keyLog := sharedKeyLog()
+	sessionCache := utls.NewLRUClientSessionCache(0)
 	dialer := *websocket.DefaultDialer
 	dialer.Proxy = nil
 	dialer.NetDialTLSContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		return p.dialTLS(ctx, network, address, keyLog, []string{"http/1.1"}, options)
+		return p.dialTLS(ctx, network, address, keyLog, []string{"http/1.1"}, sessionCache, options)
 	}
 	return &dialer
 }
@@ -98,7 +104,7 @@ func applyChromeSignatureAlgorithms(spec *utls.ClientHelloSpec) {
 	}
 }
 
-func (p Profile) clientHelloSpec(alpnOverride []string) (*utls.ClientHelloSpec, error) {
+func (p Profile) clientHelloSpec(alpnOverride []string, resumable bool) (*utls.ClientHelloSpec, error) {
 	spec, err := utls.UTLSIdToSpec(p.ClientHelloID())
 	if err != nil {
 		return nil, err
@@ -106,26 +112,36 @@ func (p Profile) clientHelloSpec(alpnOverride []string) (*utls.ClientHelloSpec, 
 	if p.ClientHelloID().Client == utls.HelloChrome_Auto.Client {
 		applyChromeSignatureAlgorithms(&spec)
 	}
-	if alpnOverride == nil {
-		return &spec, nil
-	}
-
-	filtered := spec.Extensions[:0]
-	for _, extension := range spec.Extensions {
-		switch typed := extension.(type) {
-		case *utls.ALPNExtension:
-			typed.AlpnProtocols = alpnOverride
-		case *utls.ApplicationSettingsExtension, *utls.ApplicationSettingsExtensionNew:
-			continue
+	if alpnOverride != nil {
+		filtered := spec.Extensions[:0]
+		for _, extension := range spec.Extensions {
+			switch typed := extension.(type) {
+			case *utls.ALPNExtension:
+				typed.AlpnProtocols = alpnOverride
+			case *utls.ApplicationSettingsExtension, *utls.ApplicationSettingsExtensionNew:
+				continue
+			}
+			filtered = append(filtered, extension)
 		}
-		filtered = append(filtered, extension)
+		spec.Extensions = filtered
 	}
-	spec.Extensions = filtered
+	if resumable {
+		appendPreSharedKeyExtension(&spec)
+	}
 
 	return &spec, nil
 }
 
-func (p Profile) dialTLS(ctx context.Context, network, address string, keyLog io.Writer, alpnOverride []string, options TLSOptions) (net.Conn, error) {
+func appendPreSharedKeyExtension(spec *utls.ClientHelloSpec) {
+	for _, extension := range spec.Extensions {
+		if _, ok := extension.(utls.PreSharedKeyExtension); ok {
+			return
+		}
+	}
+	spec.Extensions = append(spec.Extensions, &utls.UtlsPreSharedKeyExtension{})
+}
+
+func (p Profile) dialTLS(ctx context.Context, network, address string, keyLog io.Writer, alpnOverride []string, sessionCache utls.ClientSessionCache, options TLSOptions) (net.Conn, error) {
 	dialContext := options.DialContext
 	if dialContext == nil {
 		dialContext = chromeDialer().DialContext
@@ -146,9 +162,11 @@ func (p Profile) dialTLS(ctx context.Context, network, address string, keyLog io
 		ServerName:         serverName,
 		KeyLogWriter:       keyLog,
 		InsecureSkipVerify: options.InsecureSkipVerify,
+		ClientSessionCache: sessionCache,
+		OmitEmptyPsk:       true,
 	}
 
-	spec, err := p.clientHelloSpec(alpnOverride)
+	spec, err := p.clientHelloSpec(alpnOverride, sessionCache != nil)
 	if err != nil {
 		rawConn.Close()
 		return nil, err
@@ -181,6 +199,7 @@ type chromeRoundTripper struct {
 	profile        Profile
 	keyLog         io.Writer
 	options        TLSOptions
+	sessionCache   utls.ClientSessionCache
 	http2Transport http2.Transport
 
 	mu               sync.Mutex
@@ -245,7 +264,7 @@ func (t *chromeRoundTripper) roundTripOnIdle(request *http.Request, address stri
 }
 
 func (t *chromeRoundTripper) roundTripOnNew(request *http.Request, address string) (*http.Response, error) {
-	uConn, err := t.profile.dialTLS(request.Context(), "tcp", address, t.keyLog, nil, t.options)
+	uConn, err := t.profile.dialTLS(request.Context(), "tcp", address, t.keyLog, nil, t.sessionCache, t.options)
 	if err != nil {
 		return nil, err
 	}
