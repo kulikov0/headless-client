@@ -17,6 +17,8 @@ var greaseValues = [...]uint16{
 	0x8a8a, 0x9a9a, 0xaaaa, 0xbaba, 0xcaca, 0xdada, 0xeaea, 0xfafa,
 }
 
+const greaseSecondExtensionOffset = 0x1010
+
 const (
 	x25519MLKEM768Group = 0x11ec
 	x25519Group         = 0x001d
@@ -156,6 +158,9 @@ func shuffleExtensions(extensions []extension.Value, source *rand.Rand) {
 func wrapInGREASE(extensions []extension.Value, source *rand.Rand) []extension.Value {
 	first := greaseValues[source.Intn(len(greaseValues))]
 	last := greaseValues[source.Intn(len(greaseValues))]
+	if last == first {
+		last ^= greaseSecondExtensionOffset
+	}
 
 	wrapped := make([]extension.Value, 0, len(extensions)+2)
 	wrapped = append(wrapped, greaseExtension{value: first})

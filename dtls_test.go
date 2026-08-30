@@ -143,6 +143,23 @@ func TestDTLSGREASEBracketsTheExtensions(t *testing.T) {
 	}
 }
 
+func TestDTLSGREASEUsesTwoDistinctValues(t *testing.T) {
+	profile := ChromeWindows.WithDTLSGREASE()
+
+	for seed := range 256 {
+		order := extensionOrder(profile.dtlsClientHelloHook(pionDefaultClientHello(byte(seed))))
+		first := uint16(order[0])
+		last := uint16(order[len(order)-1])
+
+		if first == last {
+			t.Fatalf("seed %d brackets the hello with %#04x twice; RFC 8446 forbids two extensions of one type and boringssl separates them in ssl_get_grease_value", seed, first)
+		}
+		if !slices.Contains(greaseValues[:], last) {
+			t.Fatalf("seed %d ends with %#04x, which is outside the GREASE values", seed, last)
+		}
+	}
+}
+
 func pion13ClientHello() handshake.MessageClientHello {
 	var random handshake.Random
 	for i := range random.RandomBytes {
