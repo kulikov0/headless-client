@@ -37,10 +37,6 @@ var chromeSRTPProtectionProfiles = []extension.SRTPProtectionProfile{
 	extension.SRTP_AEAD_AES_128_GCM,
 }
 
-var chromeDTLS13ExtensionOrder = []uint16{
-	65281, 43, 45, 10, 51, 11, 13, 23, 14,
-}
-
 var chromeServerHelloExtensionOrder = []uint16{
 	23, 65281, 11, 14,
 }
@@ -140,18 +136,33 @@ func (p Profile) dtlsClientHelloHook(clientHello handshake.MessageClientHello) h
 	extensions := make([]extension.Value, len(clientHello.Extensions))
 	copy(extensions, clientHello.Extensions)
 
-	if p.dtlsGREASE {
-		greaseValue := greaseValues[source.Intn(len(greaseValues))]
-		extensions = append(extensions, greaseExtension{value: greaseValue})
-	}
 	if p.dtlsShuffle {
-		source.Shuffle(len(extensions), func(first, second int) {
-			extensions[first], extensions[second] = extensions[second], extensions[first]
-		})
+		shuffleExtensions(extensions, source)
+	}
+	if p.dtlsGREASE {
+		extensions = wrapInGREASE(extensions, source)
 	}
 
 	clientHello.Extensions = extensions
 	return &clientHello
+}
+
+func shuffleExtensions(extensions []extension.Value, source *rand.Rand) {
+	source.Shuffle(len(extensions), func(first, second int) {
+		extensions[first], extensions[second] = extensions[second], extensions[first]
+	})
+}
+
+func wrapInGREASE(extensions []extension.Value, source *rand.Rand) []extension.Value {
+	first := greaseValues[source.Intn(len(greaseValues))]
+	last := greaseValues[source.Intn(len(greaseValues))]
+
+	wrapped := make([]extension.Value, 0, len(extensions)+2)
+	wrapped = append(wrapped, greaseExtension{value: first})
+	wrapped = append(wrapped, extensions...)
+	wrapped = append(wrapped, greaseExtension{value: last, data: []byte{0}})
+
+	return wrapped
 }
 
 func (p Profile) dtls13MimicHook(clientHello handshake.MessageClientHello) handshake.Message {
@@ -186,7 +197,15 @@ func (p Profile) dtls13MimicHook(clientHello handshake.MessageClientHello) hands
 		})
 	}
 
-	clientHello.Extensions = orderExtensions(present, chromeDTLS13ExtensionOrder)
+	source := rand.New(rand.NewSource(seedFromRandom(clientHello.Random)))
+	if p.dtlsShuffle {
+		shuffleExtensions(present, source)
+	}
+	if p.dtlsGREASE {
+		present = wrapInGREASE(present, source)
+	}
+
+	clientHello.Extensions = present
 	clientHello.CipherSuiteIDs = append([]uint16(nil), chromeDTLS13CipherSuiteIDs...)
 	return &clientHello
 }
@@ -203,6 +222,7 @@ func seedFromRandom(random handshake.Random) int64 {
 
 type greaseExtension struct {
 	value uint16
+	data  []byte
 }
 
 func (g greaseExtension) ExtensionType() extension.Type {
@@ -210,5 +230,9 @@ func (g greaseExtension) ExtensionType() extension.Type {
 }
 
 func (g greaseExtension) MarshalData() ([]byte, error) {
-	return []byte{}, nil
+	if g.data == nil {
+		return []byte{}, nil
+	}
+
+	return g.data, nil
 }

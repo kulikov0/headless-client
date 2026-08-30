@@ -235,3 +235,58 @@ func TestVendoredDTLSFillsTheHandshakeDatagramToTheMTU(t *testing.T) {
 		}
 	}
 }
+
+func TestVendoredDTLSMimicryEmitsTheChromeExtensionSet(t *testing.T) {
+	profile := ChromeWindows.WithDTLS13Mimicry()
+	want := []uint16{10, 11, 13, 14, 23, 43, 45, 51, 65281}
+
+	clientPacketConnection, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("client listen: %v", err)
+	}
+	defer clientPacketConnection.Close()
+	silent, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("silent listen: %v", err)
+	}
+	defer silent.Close()
+
+	captured := make(chan []uint16, 4)
+	handshakeContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	connection, err := dtls.ClientWithOptions(clientPacketConnection, silent.LocalAddr(),
+		dtls.WithInsecureSkipVerify(true),
+		dtls.WithSRTPProtectionProfiles(dtls.SRTP_AES128_CM_HMAC_SHA1_80),
+		dtls.WithClientHelloMessageHook(func(clientHello handshake.MessageClientHello) handshake.Message {
+			hooked := profile.dtls13MimicHook(clientHello)
+			if message, ok := hooked.(*handshake.MessageClientHello); ok {
+				types := make([]uint16, 0, len(message.Extensions))
+				for _, value := range message.Extensions {
+					types = append(types, uint16(value.ExtensionType()))
+				}
+				select {
+				case captured <- types:
+				default:
+				}
+			}
+
+			return hooked
+		}),
+	)
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	defer connection.Close()
+	_ = connection.HandshakeContext(handshakeContext)
+
+	select {
+	case types := <-captured:
+		slices.Sort(types)
+		if !slices.Equal(types, want) {
+			t.Fatalf("mimicry emitted %v, chrome sends %v in thirteen measured handshakes", types, want)
+		}
+	default:
+		t.Fatal("no client hello reached the mimicry hook")
+	}
+}

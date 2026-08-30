@@ -32,7 +32,6 @@ var ChromeWindows = Profile{
 	clientHintPlatform: `"Windows"`,
 	clientHelloID:      utls.HelloChrome_133,
 	dtlsShuffle:        true,
-	dtlsGREASE:         true,
 }
 
 func (p Profile) Name() string {
@@ -67,8 +66,11 @@ func (p Profile) WithClientHelloID(clientHelloID utls.ClientHelloID) Profile {
 }
 
 func (p Profile) WithDTLS13Mimicry() Profile {
-	p.dtlsShuffle = false
-	p.dtlsGREASE = false
 	p.dtls13Mimic = true
+	return p
+}
+
+func (p Profile) WithDTLSGREASE() Profile {
+	p.dtlsGREASE = true
 	return p
 }

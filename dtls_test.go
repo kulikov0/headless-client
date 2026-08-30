@@ -94,18 +94,52 @@ func TestDTLSClientHelloShuffleMovesSupportedGroups(t *testing.T) {
 	}
 }
 
-func TestDTLSClientHelloInjectsGREASE(t *testing.T) {
-	order := extensionOrder(ChromeWindows.dtlsClientHelloHook(pionDefaultClientHello(7)))
-	found := false
+func carriesGREASE(order []extension.Type) bool {
 	for _, extensionType := range order {
-		for _, greaseValue := range greaseValues {
-			if uint16(extensionType) == greaseValue {
-				found = true
-			}
+		if slices.Contains(greaseValues[:], uint16(extensionType)) {
+			return true
 		}
 	}
-	if !found {
-		t.Fatal("expected a GREASE extension in the client hello")
+
+	return false
+}
+
+func TestDTLSClientHelloSendsNoGREASEByDefault(t *testing.T) {
+	for seed := byte(1); seed <= 20; seed++ {
+		order := extensionOrder(ChromeWindows.dtlsClientHelloHook(pionDefaultClientHello(seed)))
+		if carriesGREASE(order) {
+			t.Fatalf("seed %d produced %v, libwebrtc never calls SSL_CTX_set_grease_enabled and thirteen measured browser handshakes carry no GREASE", seed, order)
+		}
+	}
+}
+
+func TestDTLSGREASEBracketsTheExtensions(t *testing.T) {
+	input := pionDefaultClientHello(7)
+	plain := extensionOrder(ChromeWindows.dtlsClientHelloHook(pionDefaultClientHello(7)))
+	greased := ChromeWindows.WithDTLSGREASE().dtlsClientHelloHook(input)
+
+	clientHello, ok := greased.(*handshake.MessageClientHello)
+	if !ok {
+		t.Fatal("hook did not return a client hello")
+	}
+	order := extensionOrder(greased)
+	if len(order) != len(plain)+2 {
+		t.Fatalf("greased hello has %d extensions, want %d", len(order), len(plain)+2)
+	}
+	if !slices.Contains(greaseValues[:], uint16(order[0])) || !slices.Contains(greaseValues[:], uint16(order[len(order)-1])) {
+		t.Fatalf("extension order %v, boringssl brackets the permutation with a GREASE extension on each end", order)
+	}
+
+	first, err := clientHello.Extensions[0].MarshalData()
+	if err != nil {
+		t.Fatalf("marshal first extension: %v", err)
+	}
+	last, err := clientHello.Extensions[len(clientHello.Extensions)-1].MarshalData()
+	if err != nil {
+		t.Fatalf("marshal last extension: %v", err)
+	}
+	if len(first) != 0 || len(last) != 1 {
+		t.Fatalf("grease payloads are %d and %d bytes, boringssl sends an empty one first and a one byte one last", len(first), len(last))
 	}
 }
 
@@ -176,9 +210,11 @@ func TestDTLS13Mimicry(t *testing.T) {
 		t.Fatalf("ciphers = %v, want %v", output.CipherSuiteIDs, chromeDTLS13CipherSuiteIDs)
 	}
 
-	wantOrder := []extension.Type{65281, 43, 45, 10, 51, 11, 13, 23, 14}
-	if got := extensionOrder(output); fmt.Sprint(got) != fmt.Sprint(wantOrder) {
-		t.Fatalf("extension order = %v, want %v", got, wantOrder)
+	wantSet := []extension.Type{10, 11, 13, 14, 23, 43, 45, 51, 65281}
+	gotSet := extensionOrder(output)
+	slices.Sort(gotSet)
+	if fmt.Sprint(gotSet) != fmt.Sprint(wantSet) {
+		t.Fatalf("extension set = %v, want %v", gotSet, wantSet)
 	}
 
 	keyShare := findKeyShare(output.Extensions)
@@ -212,31 +248,37 @@ func TestDTLS13Mimicry(t *testing.T) {
 	}
 }
 
-func TestDTLS13MimicryReplacesTheShuffleAndGREASE(t *testing.T) {
+func TestDTLS13MimicryShufflesAndSendsNoGREASE(t *testing.T) {
 	profile := ChromeWindows.WithDTLS13Mimicry()
 
 	if !profile.dtls13Mimic {
 		t.Fatal("WithDTLS13Mimicry did not set the mimicry flag")
-	}
-	if profile.dtlsShuffle || profile.dtlsGREASE {
-		t.Fatalf("shuffle=%v grease=%v, applyWebRTC installs one client hello hook and the mimicry branch returns before the shuffle branch",
-			profile.dtlsShuffle, profile.dtlsGREASE)
 	}
 
 	distinctOrders := map[string]bool{}
 	for seed := byte(1); seed <= 20; seed++ {
 		order := extensionOrder(profile.dtls13MimicHook(pionDefaultClientHello(seed)))
 		distinctOrders[fmt.Sprint(order)] = true
-		for _, extensionType := range order {
-			for _, greaseValue := range greaseValues {
-				if uint16(extensionType) == greaseValue {
-					t.Fatalf("mimicry emitted GREASE extension %#04x, chrome does not GREASE its DTLS 1.3 hello", greaseValue)
-				}
-			}
+		if carriesGREASE(order) {
+			t.Fatalf("mimicry emitted GREASE in %v", order)
 		}
 	}
-	if len(distinctOrders) != 1 {
-		t.Fatalf("mimicry produced %d distinct extension orders, it must emit the fixed chrome order and never shuffle", len(distinctOrders))
+	if len(distinctOrders) < 15 {
+		t.Fatalf("20 randoms produced %d distinct orders, libwebrtc sets SSL_CTX_set_permute_extensions and thirteen browser handshakes gave thirteen distinct orders", len(distinctOrders))
+	}
+}
+
+func TestDTLSGREASEReachesTheMimicryProfile(t *testing.T) {
+	profile := ChromeWindows.WithDTLSGREASE().WithDTLS13Mimicry()
+
+	plain := extensionOrder(ChromeWindows.WithDTLS13Mimicry().dtls13MimicHook(pionDefaultClientHello(7)))
+	order := extensionOrder(profile.dtls13MimicHook(pionDefaultClientHello(7)))
+
+	if len(order) != len(plain)+2 {
+		t.Fatalf("greased mimicry has %d extensions, want %d, the mimicry hook must read the same flags as the shuffle hook", len(order), len(plain)+2)
+	}
+	if !slices.Contains(greaseValues[:], uint16(order[0])) || !slices.Contains(greaseValues[:], uint16(order[len(order)-1])) {
+		t.Fatalf("extension order %v, grease must bracket the permutation", order)
 	}
 }
 

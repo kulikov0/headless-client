@@ -52,7 +52,7 @@ The package is named `headless`.
   pool with Chrome's per-host limit and idle timeout.
 - Headers: user agent, client hints, Accept, Accept-Encoding, Sec-Fetch-*.
 - WebSocket: the Chrome upgrade handshake.
-- WebRTC: DTLS ClientHello shuffling and GREASE, optional DTLS 1.3 mimicry,
+- WebRTC: DTLS ClientHello extension shuffling, optional DTLS 1.3 mimicry,
   ServerHello extension order on both DTLS versions, no HelloVerifyRequest,
   handshake fragments sized so the datagram fills the MTU, SRTP profile order,
   ICE credential shape, ICE keepalive interval.
@@ -137,9 +137,14 @@ profile := headless.ChromeWindows.
 	WithDTLS13Mimicry()
 ```
 
-- `WithDTLS13Mimicry` is for peers that negotiate DTLS 1.3. It turns off the
-  ClientHello shuffle and the GREASE extension, and sends the Chrome DTLS 1.3
-  extension order and cipher suite list.
+- `WithDTLS13Mimicry` is for peers that negotiate DTLS 1.3. It replaces the
+  cipher suite list with Chrome's, keeps only the key shares Chrome offers, sets
+  Chrome's signature algorithms, and adds `psk_key_exchange_modes` when pion
+  leaves it out. The extensions are still shuffled.
+- `WithDTLSGREASE` adds two RFC 8701 GREASE extensions to the DTLS ClientHello,
+  an empty one first and a one byte one last. It is off by default because
+  Chrome sends neither. Use it only against a rule that matches on the extension
+  set.
 - `WithClientHelloID` selects a different utls parrot.
 - `WithUserAgent` and `WithAcceptLanguage` replace those header values.
 - `WithName` sets the string returned by `Name`.
@@ -172,9 +177,21 @@ rest of the ClientHello needs no patch. Against a Chrome 151 capture the
 extension set, the groups and the cipher list match, and the JA4 fingerprints
 are equal.
 
+libwebrtc calls `SSL_CTX_set_permute_extensions` on its SSL context. BoringSSL
+then permutes the extension table when it builds a ClientHello, and does not
+consult the permutation when it builds a ServerHello. This library shuffles the
+ClientHello extensions on every handshake and sends a fixed order in the
+ServerHello. Measured: 13 ClientHellos with 13 distinct orders, 12 ServerHellos
+with one order.
+
+libwebrtc does not call `SSL_CTX_set_grease_enabled`. Chrome sends no GREASE
+extension in DTLS, so `WithDTLSGREASE` is off by default.
+
 The `stand` directory contains a Docker capture stand. It runs a pinned Chromium
 and a client built with this library in separate network namespaces, and diffs
-their traffic.
+their traffic. A page with two `RTCPeerConnection` objects connected to each
+other produces a Chrome DTLS handshake in the browser loopback capture. It needs
+no call and no account.
 
 ## Tests
 
@@ -187,7 +204,9 @@ The tests check the values the library produces.
 - The client hint tests reproduce Chromium's brand generator across versions.
 - The header tests check the order and the values for each request destination.
 - The DTLS tests run the ClientHello hook over a pion ClientHello and read back
-  the extension order, the GREASE extension and the cipher suite list.
+  the extension order and the cipher suite list. One test builds a real pion
+  client against a socket that never answers and checks the extension set the
+  mimicry produces.
 - The ICE test builds a peer connection and reads the credential lengths out of
   the offer.
 - The transport tests run against a local server and check connection reuse.
