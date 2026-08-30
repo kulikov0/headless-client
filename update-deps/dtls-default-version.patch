@@ -1,13 +1,15 @@
+diff --git a/internal/config/util.go b/internal/config/util.go
+index b5d6c7b..6458b0e 100644
 --- a/internal/config/util.go
 +++ b/internal/config/util.go
-@@ -13,7 +13,9 @@
+@@ -13,7 +13,9 @@ func NormalizeProtocolVersionRange(
  		minVersion = protocol.Version1_2
  	}
-
--	if !maxVersion.Equal(protocol.Version1_3) {
-+	if maxVersion.Equal(protocol.Version{}) {
+ 
+-	if maxVersion != protocol.Version1_3 {
++	if maxVersion == 0 {
 +		maxVersion = protocol.Version1_3
-+	} else if !maxVersion.Equal(protocol.Version1_3) {
++	} else if maxVersion != protocol.Version1_3 {
  		maxVersion = protocol.Version1_2
  	}
-
+ 

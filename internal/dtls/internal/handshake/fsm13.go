@@ -68,7 +68,7 @@ import (
 
 type fsm13 struct {
 	currentFlight      dtlsflight13.Flight
-	flights            []*dtlsflight.Packet
+	flights            []*dtlsflight.Outbound
 	retransmit         bool
 	retransmitInterval time.Duration
 	flightACK          reliableFlight
@@ -79,39 +79,15 @@ type fsm13 struct {
 	received      recvHandshakeLease // keeps the reader paused across a prepare/send transition
 }
 
-func NewFSM13(
-	state *dtlsstate.State13,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-	initialFlight dtlsflight13.Flight,
-	initialFlights []*dtlsflight.Packet,
-	establishment *Establishment,
-) (FSM, error) {
+func NewFSM13(state *dtlsstate.State13, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig, initialFlight dtlsflight13.Flight, initialFlights []*dtlsflight.Outbound, establishment *Establishment) (FSM, error) {
 	return newFSM13WithEstablishment(state, cache, cfg, initialFlight, initialFlights, nil, establishment)
 }
 
-func newFSM13(
-	state *dtlsstate.State13,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-	initialFlight dtlsflight13.Flight,
-	initialFlights []*dtlsflight.Packet,
-	initialTranscript *Transcript,
-) (*fsm13, error) {
-	return newFSM13WithEstablishment(
-		state, cache, cfg, initialFlight, initialFlights, initialTranscript, NewEstablishment(),
-	)
+func newFSM13(state *dtlsstate.State13, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig, initialFlight dtlsflight13.Flight, initialFlights []*dtlsflight.Outbound, initialTranscript *Transcript) (*fsm13, error) {
+	return newFSM13WithEstablishment(state, cache, cfg, initialFlight, initialFlights, initialTranscript, NewEstablishment())
 }
 
-func newFSM13WithEstablishment(
-	state *dtlsstate.State13,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-	initialFlight dtlsflight13.Flight,
-	initialFlights []*dtlsflight.Packet,
-	initialTranscript *Transcript,
-	establishment *Establishment,
-) (*fsm13, error) {
+func newFSM13WithEstablishment(state *dtlsstate.State13, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig, initialFlight dtlsflight13.Flight, initialFlights []*dtlsflight.Outbound, initialTranscript *Transcript, establishment *Establishment) (*fsm13, error) {
 	if initialTranscript == nil {
 		initialTranscript = NewTranscript()
 	}
@@ -124,9 +100,7 @@ func newFSM13WithEstablishment(
 		retransmitInterval: cfg.InitialRetransmitInterval,
 		closed:             make(chan struct{}),
 		establishment:      establishment,
-		postHandshake: newPostHandshake(handshakeContext{
-			state: state, cache: cache, cfg: cfg, transcript: initialTranscript,
-		}),
+		postHandshake:      newPostHandshake(handshakeContext{state: state, cache: cache, cfg: cfg, transcript: initialTranscript}),
 	}
 	fsm.prepareFlightACKTracking(fsm.flights, fsm.retransmit)
 	if err := fsm.seedInitialFlights(fsm.flights, fsm.retransmit); err != nil {
@@ -178,20 +152,20 @@ type KeyUpdater interface {
 // ApplicationDataWriter serializes DTLS 1.3 application data with
 // post-handshake messages.
 type ApplicationDataWriter interface {
-	WriteApplicationData(context.Context, []*dtlsflight.Packet) error
+	WriteApplicationData(context.Context, []*dtlsflight.Outbound) error
 }
 
 // WriteApplicationData queues application records on the post-handshake state
 // machine. In particular, a required KeyUpdate response already in the queue is
 // emitted before these records.
-func (s *fsm13) WriteApplicationData(ctx context.Context, packets []*dtlsflight.Packet) error {
+func (s *fsm13) WriteApplicationData(ctx context.Context, packets []*dtlsflight.Outbound) error {
 	completion, completionCtx := newPostHandshakeCompletion()
 	command := postHandshakeCommand{
 		Kind:       commandSendApplicationData,
 		Canceled:   ctx.Done(),
 		Packets:    packets,
 		Completion: completion,
-		Write: func(conn Conn, packets []*dtlsflight.Packet) error {
+		Write: func(conn Conn, packets []*dtlsflight.Outbound) error {
 			_, err := conn.WritePackets(ctx, packets)
 
 			return err
@@ -212,12 +186,7 @@ func (s *fsm13) UpdateKeys(ctx context.Context, request handshake.KeyUpdateReque
 	}
 
 	completion, completionCtx := newPostHandshakeCompletion()
-	command := postHandshakeCommand{
-		Kind:       commandSendKeyUpdate,
-		Canceled:   ctx.Done(),
-		KeyUpdate:  keyUpdateCommand{Request: request},
-		Completion: completion,
-	}
+	command := postHandshakeCommand{Kind: commandSendKeyUpdate, Canceled: ctx.Done(), KeyUpdate: keyUpdateCommand{Request: request}, Completion: completion}
 	if err := s.submitPostHandshakeCommand(ctx, command); err != nil {
 		return err
 	}
@@ -236,11 +205,7 @@ func (s *fsm13) submitPostHandshakeCommand(ctx context.Context, command postHand
 	}
 }
 
-func (s *fsm13) waitPostHandshakeCompletion(
-	ctx context.Context,
-	completionCtx context.Context,
-	completion *postHandshakeCompletion,
-) error {
+func (s *fsm13) waitPostHandshakeCompletion(ctx context.Context, completionCtx context.Context, completion *postHandshakeCompletion) error {
 	select {
 	case <-completionCtx.Done():
 		return completion.result()
@@ -267,7 +232,7 @@ func (s *fsm13) prepare(ctx context.Context, conn Conn) (nextState State, err er
 	// Prepare flights
 	var (
 		dtlsAlert *alert.Alert
-		pkts      []*dtlsflight.Packet
+		pkts      []*dtlsflight.Outbound
 	)
 	gen, retransmit, ok := dtlsflight13.GetGenerator(s.currentFlight)
 	if !ok {
@@ -419,12 +384,7 @@ func (s *fsm13) handleReceivedFlight( //nolint:cyclop
 	return transition, nil
 }
 
-func (s *fsm13) handlePreviousFlightRetransmit(
-	ctx context.Context,
-	conn Conn,
-	recordsToACK []protocol.RecordNumber,
-	ackResult ACKResult,
-) (receivedFlightTransition, error) {
+func (s *fsm13) handlePreviousFlightRetransmit(ctx context.Context, conn Conn, recordsToACK []protocol.RecordNumber, ackResult ACKResult) (receivedFlightTransition, error) {
 	// A duplicate peer flight means it didn't receive our response.
 	// ACK the duplicate and retransmit the pending final flight.
 	// check WAIT exit 3:
@@ -436,11 +396,11 @@ func (s *fsm13) handlePreviousFlightRetransmit(
 	return s.transitionAfterACK(ackResult, true), nil
 }
 
-func (s *fsm13) prepareFlightACKTracking(flights []*dtlsflight.Packet, retransmit bool) {
+func (s *fsm13) prepareFlightACKTracking(flights []*dtlsflight.Outbound, retransmit bool) {
 	s.flightACK.reset()
 	if retransmit {
 		for _, packet := range flights {
-			_, packet.ShouldTrackACK = packet.Record.Content.(*handshake.Handshake)
+			_, packet.TrackACK = packet.Content.(*handshake.Handshake)
 		}
 	}
 }
@@ -449,7 +409,7 @@ func (s *fsm13) applyACKProgress(result ACKResult) {
 	for _, progress := range result.Messages {
 		remaining := s.flights[:0]
 		for _, packet := range s.flights {
-			message, ok := packet.Record.Content.(*handshake.Handshake)
+			message, ok := packet.Content.(*handshake.Handshake)
 			if !ok || message.Header.MessageSequence != progress.MessageSequence {
 				remaining = append(remaining, packet)
 			} else if !progress.Complete {

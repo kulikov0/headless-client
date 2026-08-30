@@ -1,9 +1,11 @@
+diff --git a/internal/flight/flight13/flight4handler.go b/internal/flight/flight13/flight4handler.go
+index 6bc4678..56105ea 100644
 --- a/internal/flight/flight13/flight4handler.go
 +++ b/internal/flight/flight13/flight4handler.go
-@@ -250,10 +250,14 @@ func flight4Generate( //nolint:cyclop
- 		CompressionMethod: dtlsflight.DefaultCompressionMethods()[0],
- 		Extensions:        serverHelloExtensions,
+@@ -220,10 +220,14 @@ func flight4Generate( //nolint:cyclop
+ 		serverHelloExtensions = dtlsflight.AppendConnectionIDExtensions(serverHelloExtensions, localCID, cfg.EnableRRC && offer.Offered(extension.TypeReturnRoutabilityCheck))
  	}
+ 	serverHelloMessage := &handshake.MessageServerHello{Version: protocol.Version1_2, Random: state.LocalRandom, CipherSuiteID: &cipherSuiteID, CompressionMethod: dtlsflight.DefaultCompressionMethods()[0], Extensions: serverHelloExtensions}
 +	serverHelloMessage, err = hookedServerHello(serverHelloMessage, cfg.ServerHelloMessageHook)
 +	if err != nil {
 +		return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
@@ -14,9 +16,9 @@
 -	decision := negotiation.DecideConnectionID(offer, serverHelloExtensions)
 +	decision := negotiation.DecideConnectionID(offer, serverHelloMessage.Extensions)
  
- 	serverHello := &dtlsflight.Packet{
- 		Record: &recordlayer.RecordLayer{
-@@ -317,3 +321,27 @@ func flight4Generate( //nolint:cyclop
+ 	serverHello := &dtlsflight.Outbound{
+ 		Content: &handshake.Handshake{Message: serverHelloMessage},
+@@ -276,3 +280,27 @@ func flight4Generate( //nolint:cyclop
  
  	return pkts, nil, nil
  }

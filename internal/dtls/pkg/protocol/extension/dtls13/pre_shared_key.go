@@ -31,6 +31,19 @@ type OfferedPSKs struct {
 // ExtensionType returns the IANA extension type.
 func (OfferedPSKs) ExtensionType() extension.Type { return extension.TypePreSharedKey }
 
+// MarshalSize returns the encoded payload size without serializing it.
+func (o OfferedPSKs) MarshalSize() int {
+	total := 4
+	for _, identity := range o.Identities {
+		total += 6 + len(identity.Identity)
+	}
+	for _, binder := range o.Binders {
+		total += 1 + len(binder)
+	}
+
+	return total
+}
+
 // MarshalData encodes extension_data.
 func (o OfferedPSKs) MarshalData() ([]byte, error) { //nolint:cyclop
 	if len(o.Identities) == 0 || len(o.Identities) != len(o.Binders) {
@@ -39,8 +52,7 @@ func (o OfferedPSKs) MarshalData() ([]byte, error) { //nolint:cyclop
 
 	identities := make([]byte, 0)
 	for _, identity := range o.Identities {
-		if len(identity.Identity) == 0 || len(identity.Identity) > 0xffff ||
-			len(identities) > 0xffff-6-len(identity.Identity) {
+		if len(identity.Identity) == 0 || len(identity.Identity) > 0xffff || len(identities) > 0xffff-6-len(identity.Identity) {
 			return nil, dtlserrors.ErrPreSharedKeyFormat
 		}
 		//nolint:gosec // Identity length is bounded above.
@@ -91,10 +103,7 @@ func (o *OfferedPSKs) UnmarshalData(data []byte) error { //nolint:cyclop
 		if identityLen == 0 || len(identitiesData) < identityLen+4 {
 			return dtlserrors.ErrPreSharedKeyFormat
 		}
-		identities = append(identities, PSKIdentity{
-			Identity:            bytes.Clone(identitiesData[:identityLen]),
-			ObfuscatedTicketAge: binary.BigEndian.Uint32(identitiesData[identityLen:]),
-		})
+		identities = append(identities, PSKIdentity{Identity: bytes.Clone(identitiesData[:identityLen]), ObfuscatedTicketAge: binary.BigEndian.Uint32(identitiesData[identityLen:])})
 		identitiesData = identitiesData[identityLen+4:]
 	}
 
@@ -134,6 +143,9 @@ type SelectedPSK struct {
 
 // ExtensionType returns the IANA extension type.
 func (SelectedPSK) ExtensionType() extension.Type { return extension.TypePreSharedKey }
+
+// MarshalSize returns the encoded payload size.
+func (SelectedPSK) MarshalSize() int { return 2 }
 
 // MarshalData encodes extension_data.
 func (s SelectedPSK) MarshalData() ([]byte, error) {

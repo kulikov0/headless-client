@@ -12,11 +12,11 @@ import (
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
-func listenWithConfig(network string, laddr *net.UDPAddr, config *dtlsConfig) (net.Listener, error) {
-	lc := udp.ListenConfig{
-		AcceptFilter: func(packet []byte) bool {
-			pkts, err := recordlayer.UnpackDatagram(packet)
-			if err != nil || len(pkts) == 0 {
+func packetListenerOptions(config *dtlsConfig) []udp.ListenerOption {
+	opts := []udp.ListenerOption{
+		udp.WithAcceptFilter(func(packet []byte) bool {
+			pkts, _ := recordlayer.UnpackDatagram(packet, recordlayer.UnpackDatagramConfig{})
+			if len(pkts) == 0 {
 				return false
 			}
 			h := &recordlayer.Header{}
@@ -25,50 +25,74 @@ func listenWithConfig(network string, laddr *net.UDPAddr, config *dtlsConfig) (n
 			}
 
 			return h.ContentType == protocol.ContentTypeHandshake
-		},
-		ListenConfig: config.ListenConfig,
+		}),
+		udp.WithReceiveBufferSize(config.ReceiveBufferSize),
 	}
 	// If connection ID support is enabled, then they must be supported in
 	// routing.
 	if config.ConnectionIDGenerator != nil {
-		lc.DatagramRouter = cidDatagramRouter(len(config.ConnectionIDGenerator()))
-		lc.ConnectionIdentifier = cidConnIdentifier()
-	}
-	parent, err := lc.Listen(network, laddr)
-	if err != nil {
-		return nil, err
+		opts = append(opts, udp.WithDatagramRouter(cidDatagramRouter(len(config.ConnectionIDGenerator()))), udp.WithConnectionIdentifier(cidConnIdentifier()))
 	}
 
+	return opts
+}
+
+func newListenerWithConfig(parent dtlsnet.PacketListener, config *dtlsConfig) net.Listener {
 	return &listener{
 		config: config,
 		parent: parent,
-	}, nil
+	}
 }
 
-// ListenWithOptions creates a DTLS listener.
-func ListenWithOptions(network string, laddr *net.UDPAddr, opts ...ServerOption) (net.Listener, error) {
+func buildListenerConfig(opts ...ServerOption) (*dtlsConfig, error) {
 	config, err := buildServerConfig(opts...)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateConfig(config); err != nil {
+	if err = validateConfig(config); err != nil {
 		return nil, err
 	}
 
-	return listenWithConfig(network, laddr, config)
+	return config, nil
 }
 
-// NewListenerWithOptions creates a DTLS listener which accepts connections from an inner Listener.
-func NewListenerWithOptions(inner dtlsnet.PacketListener, opts ...ServerOption) (net.Listener, error) {
-	config, err := buildServerConfig(opts...)
+func listenWithConfig(conn net.PacketConn, config *dtlsConfig) net.Listener {
+	return newListenerWithConfig(udp.Listen(conn, packetListenerOptions(config)...), config)
+}
+
+// Listen creates a DTLS listener over an existing packet connection.
+func Listen(conn net.PacketConn, opts ...ServerOption) (net.Listener, error) {
+	config, err := buildListenerConfig(opts...)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateConfig(config); err != nil {
+
+	return listenWithConfig(conn, config), nil
+}
+
+// ListenAddr creates a DTLS listener bound to laddr.
+func ListenAddr(network string, laddr *net.UDPAddr, opts ...ServerOption) (net.Listener, error) {
+	config, err := buildListenerConfig(opts...)
+	if err != nil {
 		return nil, err
 	}
 
-	return &listener{config: config, parent: inner}, nil
+	conn, err := net.ListenUDP(network, laddr)
+	if err != nil {
+		return nil, err
+	}
+
+	return listenWithConfig(conn, config), nil
+}
+
+// NewListener creates a DTLS listener which accepts connections from an inner packet listener.
+func NewListener(inner dtlsnet.PacketListener, opts ...ServerOption) (net.Listener, error) {
+	config, err := buildListenerConfig(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return newListenerWithConfig(inner, config), nil
 }
 
 // listener represents a DTLS listener.
@@ -85,7 +109,14 @@ func (l *listener) Accept() (net.Conn, error) {
 		return nil, err
 	}
 
-	return serverWithConfig(c, raddr, l.config)
+	conn, err := serverWithConfig(c, raddr, l.config)
+	if err != nil {
+		_ = c.Close()
+
+		return nil, err
+	}
+
+	return conn, nil
 }
 
 // Close closes the listener.

@@ -9,7 +9,6 @@ import (
 	dtlsflight "github.com/kulikov0/headless-client/internal/dtls/internal/flight"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
-	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
 // RecvHandshakeState signals that a handshake packet has been received.
@@ -83,7 +82,7 @@ type FSM interface {
 type Conn interface {
 	dtlsflight.Conn
 	Notify(ctx context.Context, level alert.Level, desc alert.Description) error
-	WritePackets(context.Context, []*dtlsflight.Packet) (*WriteResult, error)
+	WritePackets(context.Context, []*dtlsflight.Outbound) (*WriteResult, error)
 	RecvHandshake() <-chan RecvHandshakeState
 	SetLocalEpoch(epoch uint16)
 }
@@ -101,13 +100,7 @@ func sendACK(ctx context.Context, conn Conn, epoch uint16, records []protocol.Re
 		return nil
 	}
 
-	_, err := conn.WritePackets(ctx, []*dtlsflight.Packet{{
-		Record: &recordlayer.RecordLayer{
-			Header:  recordlayer.Header{Version: protocol.Version1_2, Epoch: epoch},
-			Content: &protocol.ACK{Records: records},
-		},
-		ShouldEncrypt: true,
-	}})
+	_, err := conn.WritePackets(ctx, []*dtlsflight.Outbound{{Epoch: epoch, Content: &protocol.ACK{Records: records}, Protection: dtlsflight.ProtectionCiphertext}})
 
 	return err
 }

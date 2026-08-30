@@ -3,47 +3,18 @@ package dtls
 import (
 	"net"
 
-	"github.com/pion/logging"
+	cryptosuite "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 )
 
-type Config struct {
-	ServerName         string
-	InsecureSkipVerify bool
-	LoggerFactory      logging.LoggerFactory
+type (
+	CipherSuiteID = cryptosuite.ID
+	CipherSuite   = cryptosuite.Suite
+)
+
+func ClientWithOptions(conn net.PacketConn, rAddr net.Addr, opts ...ClientOption) (*Conn, error) {
+	return Client(conn, rAddr, opts...)
 }
 
-func (c *Config) clientOptions() []ClientOption {
-	if c == nil {
-		return nil
-	}
-	var opts []ClientOption
-	if c.ServerName != "" {
-		opts = append(opts, WithServerName(c.ServerName))
-	}
-	if c.InsecureSkipVerify {
-		opts = append(opts, WithInsecureSkipVerify(true))
-	}
-	if c.LoggerFactory != nil {
-		opts = append(opts, WithLoggerFactory(c.LoggerFactory))
-	}
-	return opts
-}
-
-func (c *Config) serverOptions() []ServerOption {
-	if c == nil {
-		return nil
-	}
-	var opts []ServerOption
-	if c.LoggerFactory != nil {
-		opts = append(opts, WithLoggerFactory(c.LoggerFactory))
-	}
-	return opts
-}
-
-func Client(conn net.PacketConn, rAddr net.Addr, config *Config) (*Conn, error) {
-	return ClientWithOptions(conn, rAddr, config.clientOptions()...)
-}
-
-func Server(conn net.PacketConn, rAddr net.Addr, config *Config) (*Conn, error) {
-	return ServerWithOptions(conn, rAddr, config.serverOptions()...)
+func ServerWithOptions(conn net.PacketConn, rAddr net.Addr, opts ...ServerOption) (*Conn, error) {
+	return Server(conn, rAddr, opts...)
 }

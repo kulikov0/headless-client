@@ -40,15 +40,29 @@ func (h *Header) Marshal() ([]byte, error) {
 	hs := FixedHeaderSize + len(h.ConnectionID)
 
 	out := make([]byte, hs)
+	_, err := h.MarshalTo(out)
+
+	return out, err
+}
+
+// MarshalTo encodes a TLS RecordLayer Header to binary using pre-allocated buffer.
+func (h *Header) MarshalTo(out []byte) (int, error) {
+	if h.SequenceNumber > MaxSequenceNumber {
+		return 0, dtlserrors.ErrSequenceNumberOverflow
+	}
+	hs := FixedHeaderSize + len(h.ConnectionID)
+	if len(out) < hs {
+		return 0, dtlserrors.ErrBufferTooSmall
+	}
 	out[0] = byte(h.ContentType)
-	out[1] = h.Version.Major
-	out[2] = h.Version.Minor
+	out[1] = h.Version.Major()
+	out[2] = h.Version.Minor()
 	binary.BigEndian.PutUint16(out[3:], h.Epoch)
 	util.PutBigEndianUint48(out[5:], h.SequenceNumber)
 	copy(out[11:11+len(h.ConnectionID)], h.ConnectionID)
 	binary.BigEndian.PutUint16(out[hs-2:], h.ContentLen)
 
-	return out, nil
+	return h.MarshalSize(), nil
 }
 
 // Unmarshal populates a TLS RecordLayer Header from binary.
@@ -69,8 +83,7 @@ func (h *Header) Unmarshal(data []byte) error {
 		h.ConnectionID = nil
 	}
 
-	h.Version.Major = data[1]
-	h.Version.Minor = data[2]
+	h.Version = protocol.VersionFromBytes(data[1], data[2])
 	h.Epoch = binary.BigEndian.Uint16(data[3:])
 
 	// SequenceNumber is stored as uint48, make into uint64
@@ -79,14 +92,14 @@ func (h *Header) Unmarshal(data []byte) error {
 	h.SequenceNumber = binary.BigEndian.Uint64(seqCopy)
 	h.ContentLen = binary.BigEndian.Uint16(data[headerSize-2:])
 
-	if !h.Version.Equal(protocol.Version1_0) && !h.Version.Equal(protocol.Version1_2) {
+	if h.Version != protocol.Version1_0 && h.Version != protocol.Version1_2 {
 		return dtlserrors.ErrUnsupportedProtocolVersion
 	}
 
 	return nil
 }
 
-// Size returns the total size of the header.
-func (h *Header) Size() int {
+// MarshalSize returns the total size of the header.
+func (h *Header) MarshalSize() int {
 	return FixedHeaderSize + len(h.ConnectionID)
 }

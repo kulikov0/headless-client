@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite"
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 	internalstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
+	cryptosuite "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signaturehash"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
@@ -44,28 +44,25 @@ const (
 )
 
 type (
-	CipherSuite           = ciphersuite.CipherSuite
-	CipherSuiteID         = ciphersuite.ID
+	CipherSuite           = cryptosuite.Suite
 	SRTPProtectionProfile = extension.SRTPProtectionProfile
 )
 
 type ClientHelloInfo struct {
 	ServerName   string
-	CipherSuites []CipherSuiteID
+	CipherSuites []cryptosuite.ID
 	RandomBytes  [handshake.RandomBytesLength]byte
 }
 
 type CertificateRequestInfo struct {
 	AcceptableCAs    [][]byte
 	SignatureSchemes []signaturehash.Algorithm
+	Version          protocol.Version
 }
 
 func (cri *CertificateRequestInfo) SupportsCertificate(certificate *tls.Certificate) error {
 	if len(cri.SignatureSchemes) > 0 {
-		if _, err := signaturehash.SelectSignatureScheme13(
-			cri.SignatureSchemes,
-			certificate.PrivateKey,
-		); err != nil {
+		if _, err := signaturehash.SelectSignatureScheme(cri.SignatureSchemes, certificate.PrivateKey, cri.Version); err != nil {
 			return err
 		}
 	}
@@ -121,10 +118,10 @@ type HandshakeConfig struct {
 	ClientCAs                     *x509.CertPool
 	InitialRetransmitInterval     time.Duration
 	DisableRetransmitBackoff      bool
-	CustomCipherSuites            func() []CipherSuite
 	EllipticCurves                []elliptic.Curve
 	InsecureSkipHelloVerify       bool
 	ConnectionIDGenerator         func() []byte
+	EnableRRC                     bool
 	HelloRandomBytesGenerator     func() [handshake.RandomBytesLength]byte
 	Log                           logging.LeveledLogger
 	KeyLogWriter                  io.Writer

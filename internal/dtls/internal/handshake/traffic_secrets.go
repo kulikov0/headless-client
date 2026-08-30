@@ -37,13 +37,7 @@ type handshakeKeySchedule struct {
 	MasterSecret            []byte
 }
 
-func commitPreparedFlights(
-	conn Conn,
-	state *dtlsstate.State13,
-	transcript *Transcript,
-	cfg *dtlsconfig.HandshakeConfig,
-	flights []*dtlsflight.Packet,
-) error {
+func commitPreparedFlights(conn Conn, state *dtlsstate.State13, transcript *Transcript, cfg *dtlsconfig.HandshakeConfig, flights []*dtlsflight.Outbound) error {
 	nextEpoch, protectedFlightStart := prepareFlightPackets(state, cfg.InitialEpoch, flights)
 	if err := commitOutboundFlight(state, transcript, flights, protectedFlightStart); err != nil {
 		return err
@@ -61,19 +55,19 @@ func commitPreparedFlights(
 func prepareFlightPackets(
 	state *dtlsstate.State13,
 	epoch uint16,
-	flights []*dtlsflight.Packet,
+	flights []*dtlsflight.Outbound,
 ) (uint16, int) {
 	nextEpoch := epoch
 	protectedFlightStart := len(flights)
 	for i, packet := range flights {
-		packet.Record.Header.Epoch += epoch
-		if packet.Record.Header.Epoch > nextEpoch {
-			nextEpoch = packet.Record.Header.Epoch
+		packet.Epoch += epoch
+		if packet.Epoch > nextEpoch {
+			nextEpoch = packet.Epoch
 		}
-		if packet.ShouldEncrypt && protectedFlightStart == len(flights) {
+		if packet.Protection == dtlsflight.ProtectionCiphertext && protectedFlightStart == len(flights) {
 			protectedFlightStart = i
 		}
-		if handshakeMessage, ok := packet.Record.Content.(*handshake.Handshake); ok {
+		if handshakeMessage, ok := packet.Content.(*handshake.Handshake); ok {
 			handshakeMessage.Header.MessageSequence = uint16(state.HandshakeSendSequence) //nolint:gosec // G115
 			state.HandshakeSendSequence++
 		}
@@ -82,12 +76,7 @@ func prepareFlightPackets(
 	return nextEpoch, protectedFlightStart
 }
 
-func commitOutboundFlight(
-	state *dtlsstate.State13,
-	transcript *Transcript,
-	flights []*dtlsflight.Packet,
-	protectedFlightStart int,
-) error {
+func commitOutboundFlight(state *dtlsstate.State13, transcript *Transcript, flights []*dtlsflight.Outbound, protectedFlightStart int) error {
 	if err := appendCommittedOutboundHandshakeFlight(state, transcript, flights[:protectedFlightStart]); err != nil {
 		return err
 	}
@@ -113,11 +102,7 @@ func ensureHandshakeTrafficSecrets(state *dtlsstate.State13, transcript *Transcr
 	return selectHashIfReady(transcript, state.CipherSuite)
 }
 
-func appendCommittedOutboundHandshakeFlight(
-	state *dtlsstate.State13,
-	transcript *Transcript,
-	pkts []*dtlsflight.Packet,
-) error {
+func appendCommittedOutboundHandshakeFlight(state *dtlsstate.State13, transcript *Transcript, pkts []*dtlsflight.Outbound) error {
 	for _, p := range pkts {
 		if err := populateOutboundCertificateVerify(state, transcript, p); err != nil {
 			return err
@@ -125,12 +110,7 @@ func appendCommittedOutboundHandshakeFlight(
 		if err := populateOutboundFinished(state, transcript, p); err != nil {
 			return err
 		}
-		if err := AppendOutboundHandshakeFlight(
-			transcript,
-			state.IsClient,
-			state.CipherSuite,
-			[]*dtlsflight.Packet{p},
-		); err != nil {
+		if err := AppendOutboundHandshakeFlight(transcript, state.IsClient, state.CipherSuite, []*dtlsflight.Outbound{p}); err != nil {
 			return err
 		}
 	}
@@ -138,15 +118,11 @@ func appendCommittedOutboundHandshakeFlight(
 	return nil
 }
 
-func populateOutboundCertificateVerify(
-	state *dtlsstate.State13,
-	transcript *Transcript,
-	pkt *dtlsflight.Packet,
-) error {
-	if pkt == nil || pkt.Record == nil {
+func populateOutboundCertificateVerify(state *dtlsstate.State13, transcript *Transcript, pkt *dtlsflight.Outbound) error {
+	if pkt == nil || pkt.Content == nil {
 		return nil
 	}
-	h, ok := pkt.Record.Content.(*handshake.Handshake)
+	h, ok := pkt.Content.(*handshake.Handshake)
 	if !ok {
 		return nil
 	}
@@ -162,12 +138,7 @@ func populateOutboundCertificateVerify(
 	if err != nil {
 		return err
 	}
-	certificateVerify.Signature, err = dtlscrypto.GenerateCertificateVerify(
-		input,
-		pkt.CertificateVerifySigner,
-		certificateVerify.HashAlgorithm,
-		certificateVerify.SignatureAlgorithm,
-	)
+	certificateVerify.Signature, err = dtlscrypto.GenerateCertificateVerify(input, pkt.CertificateVerifySigner, certificateVerify.HashAlgorithm, certificateVerify.SignatureAlgorithm)
 
 	return err
 }
@@ -175,12 +146,12 @@ func populateOutboundCertificateVerify(
 func populateOutboundFinished(
 	state *dtlsstate.State13,
 	transcript *Transcript,
-	p *dtlsflight.Packet,
+	p *dtlsflight.Outbound,
 ) error {
-	if p == nil || p.Record == nil {
+	if p == nil || p.Content == nil {
 		return nil
 	}
-	h, ok := p.Record.Content.(*handshake.Handshake)
+	h, ok := p.Content.(*handshake.Handshake)
 	if !ok {
 		return nil
 	}
@@ -211,10 +182,7 @@ func populateOutboundFinished(
 
 // deriveHandshakeTrafficSecrets derives the DTLS 1.3 client and server
 // handshake traffic secrets from the ECDHE secret and transcript hash.
-func deriveHandshakeTrafficSecrets(
-	hashFunc func() hash.Hash,
-	keyAgreementSecret, transcriptHash []byte,
-) (dtlsstate.TrafficSecrets, error) {
+func deriveHandshakeTrafficSecrets(hashFunc func() hash.Hash, keyAgreementSecret, transcriptHash []byte) (dtlsstate.TrafficSecrets, error) {
 	secrets, err := deriveHandshakeKeySchedule(hashFunc, keyAgreementSecret, transcriptHash)
 	if err != nil {
 		return dtlsstate.TrafficSecrets{}, err
@@ -223,10 +191,7 @@ func deriveHandshakeTrafficSecrets(
 	return secrets.HandshakeTrafficSecrets, nil
 }
 
-func deriveHandshakeKeySchedule(
-	hashFunc func() hash.Hash,
-	keyAgreementSecret, transcriptHash []byte,
-) (handshakeKeySchedule, error) {
+func deriveHandshakeKeySchedule(hashFunc func() hash.Hash, keyAgreementSecret, transcriptHash []byte) (handshakeKeySchedule, error) {
 	hashSize, err := hashSize(hashFunc)
 	if err != nil {
 		return handshakeKeySchedule{}, err
@@ -265,13 +230,7 @@ func deriveHandshakeKeySchedule(
 		return handshakeKeySchedule{}, err
 	}
 
-	return handshakeKeySchedule{
-		HandshakeTrafficSecrets: dtlsstate.TrafficSecrets{
-			Client: clientSecret,
-			Server: serverSecret,
-		},
-		MasterSecret: masterSecret,
-	}, nil
+	return handshakeKeySchedule{HandshakeTrafficSecrets: dtlsstate.TrafficSecrets{Client: clientSecret, Server: serverSecret}, MasterSecret: masterSecret}, nil
 }
 
 func deriveHandshakeSecret(hashFunc func() hash.Hash, keyAgreementSecret []byte) ([]byte, error) {
@@ -314,12 +273,7 @@ func deriveMasterSecret(hashFunc func() hash.Hash, handshakeSecret []byte) ([]by
 	return keyschedule.HkdfExtract(hashFunc, derivedSecret, make([]byte, hashSize))
 }
 
-func deriveTrafficSecret(
-	hashFunc func() hash.Hash,
-	baseSecret []byte,
-	label string,
-	transcriptHash []byte,
-) ([]byte, error) {
+func deriveTrafficSecret(hashFunc func() hash.Hash, baseSecret []byte, label string, transcriptHash []byte) ([]byte, error) {
 	hashSize, err := hashSize(hashFunc)
 	if err != nil {
 		return nil, err
@@ -331,10 +285,7 @@ func deriveTrafficSecret(
 	return keyschedule.HkdfExpandLabel(hashFunc, baseSecret, label, transcriptHash, hashSize)
 }
 
-func deriveApplicationTrafficSecrets(
-	hashFunc func() hash.Hash,
-	masterSecret, transcriptHash []byte,
-) (dtlsstate.TrafficSecrets, error) {
+func deriveApplicationTrafficSecrets(hashFunc func() hash.Hash, masterSecret, transcriptHash []byte) (dtlsstate.TrafficSecrets, error) {
 	clientSecret, err := deriveTrafficSecret(
 		hashFunc,
 		masterSecret,
@@ -508,11 +459,7 @@ func DeriveAndStoreResumptionMasterSecret(state *dtlsstate.State13, transcript *
 		return err
 	}
 
-	state.KeySchedule.ResumptionMasterSecret, err = deriveResumptionMasterSecret(
-		state.CipherSuite.HashFunc(),
-		masterSecret,
-		transcriptHash,
-	)
+	state.KeySchedule.ResumptionMasterSecret, err = deriveResumptionMasterSecret(state.CipherSuite.HashFunc(), masterSecret, transcriptHash)
 
 	return err
 }
@@ -616,11 +563,7 @@ func finishedKey(hashFunc func() hash.Hash, baseKey []byte) ([]byte, error) {
 
 // FinishedVerifyDataFromTranscript returns verify_data for the current
 // transcript snapshot.
-func FinishedVerifyDataFromTranscript(
-	hashFunc func() hash.Hash,
-	baseKey []byte,
-	transcript *Transcript,
-) ([]byte, error) {
+func FinishedVerifyDataFromTranscript(hashFunc func() hash.Hash, baseKey []byte, transcript *Transcript) ([]byte, error) {
 	if transcript == nil {
 		return nil, dtlserrors.ErrHandshakeTranscriptHashNotSelected
 	}
@@ -671,12 +614,7 @@ func verifyFinishedData(hashFunc func() hash.Hash, baseKey, transcriptHash, veri
 
 // VerifyFinishedDataFromTranscript verifies TLS 1.3 Finished verify_data
 // against the current transcript snapshot.
-func VerifyFinishedDataFromTranscript(
-	hashFunc func() hash.Hash,
-	baseKey []byte,
-	transcript *Transcript,
-	verifyData []byte,
-) error {
+func VerifyFinishedDataFromTranscript(hashFunc func() hash.Hash, baseKey []byte, transcript *Transcript, verifyData []byte) error {
 	if transcript == nil {
 		return dtlserrors.ErrHandshakeTranscriptHashNotSelected
 	}

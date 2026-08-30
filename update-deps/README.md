@@ -175,7 +175,7 @@ retransmit timer fires, and a handshake between two dual-stack peers fails with
 a context deadline. The patch adds the same postSetup call that upstream
 already uses for the client.
 
-Applied by dtls.sh. Not in upstream as of pion/dtls commit 1211026.
+Applied by dtls.sh. Not in upstream as of pion/dtls commit 16fcc843.
 
 The guard is TestVendoredDTLSCompletesADualStackHandshake in
 dtls_vendor_test.go. Without the patch the server side of that handshake ends
@@ -202,10 +202,26 @@ Applied by chromehttp2.sh.
 
 ## _dtls-files
 
-compat_shim.go, copied into internal/dtls by dtls.sh. It restores the Config
-struct and the Client and Server constructors that upstream removed, and maps
-them onto ClientOption and ServerOption. The vendored tree does not build
-without it.
+compat_shim.go, copied into internal/dtls by dtls.sh.
+
+The vendored trees are pinned to different points of the pion history.
+internal/dtls comes from pion/dtls main. webrtc and internal/ice come from
+pion/webrtc v4.2.11 and pion/ice v4.2.2, which are built against the pion/dtls
+v3.1.2 release. Neither of those two trees is patched here, so their calls into
+dtls are upstream code.
+
+Four names differ between the release and main. The release has
+ClientWithOptions, ServerWithOptions, CipherSuiteID and CipherSuite in the root
+package. On main the constructors are Client and Server, and the two types are
+in pkg/crypto/ciphersuite. The shim declares the four release names, so the
+vendored trees compile against internal/dtls without changes.
+
+The alternative is a patch per call site in webrtc/dtlstransport.go,
+webrtc/settingengine.go and internal/ice/gather.go, re-derived on every webrtc
+and ice update.
+
+Remove the shim once a pion/dtls release carries the main API and webrtc and ice
+are updated to it.
 
 The underscore prefix stops the go tool from building the directory.
 

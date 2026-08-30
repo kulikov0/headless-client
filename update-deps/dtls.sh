@@ -5,7 +5,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DST="$REPO/internal/dtls"
 UD="$REPO/update-deps"
 UPSTREAM="https://github.com/pion/dtls"
-COMMIT="66a287946ee8b903d9689a56ff789c1b31613b74"
+COMMIT="16fcc8432011043c73b2cc3ae7e09f9429dd925d"
 OLD="github.com/pion/dtls/v3"
 NEW="github.com/kulikov0/headless-client/internal/dtls"
 

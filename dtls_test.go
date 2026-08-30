@@ -300,7 +300,7 @@ func pionDefaultServerHello() handshake.MessageServerHello {
 	cipherSuiteID := uint16(0xc02b)
 
 	return handshake.MessageServerHello{
-		Version:           protocol.Version{Major: 0xfe, Minor: 0xfd},
+		Version:           protocol.Version1_2,
 		CipherSuiteID:     &cipherSuiteID,
 		CompressionMethod: protocol.CompressionMethods()[0],
 		Extensions: []extension.Value{
@@ -347,7 +347,7 @@ func pionDefaultDTLS13ServerHello() handshake.MessageServerHello {
 	cipherSuiteID := uint16(0x1301)
 
 	return handshake.MessageServerHello{
-		Version:           protocol.Version{Major: 0xfe, Minor: 0xfd},
+		Version:           protocol.Version1_2,
 		CipherSuiteID:     &cipherSuiteID,
 		CompressionMethod: protocol.CompressionMethods()[0],
 		Extensions: []extension.Value{

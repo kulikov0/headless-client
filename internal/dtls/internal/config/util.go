@@ -9,13 +9,13 @@ import "github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 func NormalizeProtocolVersionRange(
 	minVersion, maxVersion protocol.Version,
 ) (protocol.Version, protocol.Version) {
-	if !minVersion.Equal(protocol.Version1_3) {
+	if minVersion != protocol.Version1_3 {
 		minVersion = protocol.Version1_2
 	}
 
-	if maxVersion.Equal(protocol.Version{}) {
+	if maxVersion == 0 {
 		maxVersion = protocol.Version1_3
-	} else if !maxVersion.Equal(protocol.Version1_3) {
+	} else if maxVersion != protocol.Version1_3 {
 		maxVersion = protocol.Version1_2
 	}
 
@@ -49,14 +49,14 @@ func SelectVersion(
 		}
 	}
 
-	return protocol.Version{}, false
+	return 0, false
 }
 
 func versionAtLeast(version, minVersion protocol.Version) bool {
 	// DTLS encodes newer versions as numerically smaller Minor bytes.
-	return version.Minor <= minVersion.Minor
+	return version.Minor() <= minVersion.Minor()
 }
 
 func versionAtMost(version, maxVersion protocol.Version) bool {
-	return version.Minor >= maxVersion.Minor
+	return version.Minor() >= maxVersion.Minor()
 }

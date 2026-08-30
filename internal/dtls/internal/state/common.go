@@ -9,8 +9,8 @@ import (
 	"bytes"
 	"sync/atomic"
 
-	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/internal/negotiation"
+	cryptosuite "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
@@ -24,7 +24,7 @@ type Common struct {
 	LocalSequenceNumber       []uint64 // uint48
 	RemoteSequenceNumber      []uint64
 	LocalRandom, RemoteRandom handshake.Random
-	CipherSuite               ciphersuite.CipherSuite // nil if a cipherSuite hasn't been chosen
+	CipherSuite               cryptosuite.Suite // nil if a cipherSuite hasn't been chosen
 	PeerCertificates          [][]byte
 	IdentityHint              []byte
 	SessionID                 []byte
@@ -205,9 +205,5 @@ func NewState13(isClient bool) State13 {
 		LocalVersion: protocol.Version1_3,
 	}
 
-	return State13{
-		Common:        common,
-		LocalKeypairs: make(map[elliptic.Curve]*elliptic.Keypair),
-		TrafficKeys:   &TrafficKeyState{},
-	}
+	return State13{Common: common, LocalKeypairs: make(map[elliptic.Curve]*elliptic.Keypair), TrafficKeys: &TrafficKeyState{}}
 }

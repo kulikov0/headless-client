@@ -229,6 +229,10 @@ func (g greaseExtension) ExtensionType() extension.Type {
 	return extension.Type(g.value)
 }
 
+func (g greaseExtension) MarshalSize() int {
+	return len(g.data)
+}
+
 func (g greaseExtension) MarshalData() ([]byte, error) {
 	if g.data == nil {
 		return []byte{}, nil

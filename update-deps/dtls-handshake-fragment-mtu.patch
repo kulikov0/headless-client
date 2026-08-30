@@ -1,21 +1,21 @@
+diff --git a/conn.go b/conn.go
+index a241bf2..e0fd417 100644
 --- a/conn.go
 +++ b/conn.go
-@@ -1119,7 +1119,7 @@ func (c *Conn) processHandshakePacket(pkt *dtlsflight.Packet, dtlsHandshake *han
+@@ -48,6 +48,7 @@ const (
+ 	maxPlaintextRecordLen         = 1 << 14
+ 	maxCIDInnerPlaintextLen       = maxPlaintextRecordLen
+ 	maxDTLS13InnerPlaintextLen    = maxPlaintextRecordLen + 1
++	innerPlaintextContentTypeLen  = 1
+ 	// maxAppDataPacketQueueSize is the maximum number of app data packets we will.
+ 	// enqueue before the handshake is completed.
+ 	maxAppDataPacketQueueSize = 100
+@@ -1154,7 +1155,12 @@ type preparedRecord struct {
+ }
  
- 	rawPackets := make([][]byte, 0)
- 
+ func (c *Conn) prepareHandshakeRecords(outbound *dtlsflight.Outbound, dtlsHandshake *handshake.Handshake) ([]preparedRecord, error) {
 -	handshakeFragments, err := c.fragmentHandshake(dtlsHandshake)
-+	handshakeFragments, err := c.fragmentHandshake(dtlsHandshake, recordlayer.FixedHeaderSize)
- 	if err != nil {
- 		return nil, err
- 	}
-@@ -1226,13 +1226,18 @@ func (c *Conn) processProtectedHandshakePacketTracked(
- 		return nil, dtlserrors.ErrCipherSuiteRecordProtectionNotImplemented
- 	}
- 
--	handshakeFragments, err := c.fragmentHandshake(dtlsHandshake)
-+	epoch := pkt.Record.Header.Epoch
-+	recordOverhead, err := c.protectedRecordOverhead(epoch)
++	recordOverhead, err := c.handshakeRecordOverhead(outbound.Epoch, outbound.Protection)
 +	if err != nil {
 +		return nil, err
 +	}
@@ -24,13 +24,7 @@
  	if err != nil {
  		return nil, err
  	}
- 
- 	rawPackets := make([]preparedRecord, 0, len(handshakeFragments))
--	epoch := pkt.Record.Header.Epoch
- 	for _, handshakeFragment := range handshakeFragments {
- 		selected, err := selectHandshakeFragment(pkt.HandshakeFragmentOffsets, handshakeFragment)
- 		if err != nil {
-@@ -1293,7 +1298,7 @@ func selectHandshakeFragment(offsets map[uint32]uint32, raw []byte) (bool, error
+@@ -1214,7 +1220,7 @@ func selectHandshakeFragment(offsets map[uint32]uint32, raw []byte) (bool, error
  	return ok && length == header.FragmentLength, nil
  }
  
@@ -39,7 +33,7 @@
  	content, err := dtlsHandshake.Message.Marshal()
  	if err != nil {
  		return nil, err
-@@ -1301,7 +1306,7 @@ func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte,
+@@ -1222,7 +1228,7 @@ func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte,
  
  	fragmentedHandshakes := make([][]byte, 0)
  
@@ -48,7 +42,7 @@
  	if len(contentFragments) == 0 {
  		contentFragments = [][]byte{
  			{},
-@@ -1334,6 +1339,34 @@ func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte,
+@@ -1255,6 +1261,43 @@ func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte,
  	return fragmentedHandshakes, nil
  }
  
@@ -61,12 +55,21 @@
 +	return available
 +}
 +
-+func (c *Conn) protectedRecordOverhead(epoch uint16) (int, error) {
-+	generation, err := c.writeTrafficGeneration(epoch)
++func (c *Conn) handshakeRecordOverhead(epoch uint16, protection dtlsflight.Protection) (int, error) {
++	common := dtlsstate.CommonState(c.state)
++	if protection != dtlsflight.ProtectionCiphertext || common.LocalVersion != protocol.Version1_3 {
++		return recordlayer.FixedHeaderSize, nil
++	}
++	if common.CipherSuite == nil {
++		return 0, dtlserrors.ErrCipherSuiteNotInit
++	}
++	if _, err := c.writeTrafficGeneration(epoch); err != nil {
++		return 0, err
++	}
++	protectedLen, err := common.CipherSuite.Capabilities().ProtectedLen(innerPlaintextContentTypeLen)
 +	if err != nil {
 +		return 0, err
 +	}
-+
 +	header := recordlayer.UnifiedHeader{SeqBit: true, LengthBit: true}
 +	if state13, ok := c.state.(*dtlsstate.State13); ok &&
 +		state13.CID.Negotiated && state13.CID.Send.UseCID {
@@ -77,45 +80,9 @@
 +		return 0, err
 +	}
 +
-+	return len(marshalled) + generation.Protection.Overhead(), nil
++	return len(marshalled) + protectedLen, nil
 +}
 +
- var poolReadBuffer = sync.Pool{ //nolint:gochecknoglobals
- 	New: func() any {
- 		b := make([]byte, inboundBufferSize)
---- a/internal/ciphersuite/tls_13.go
-+++ b/internal/ciphersuite/tls_13.go
-@@ -36,6 +36,7 @@ type RecordProtection13 interface {
- 		header recordlayer.UnifiedHeader,
- 		encryptedRecord []byte,
- 	) (recordlayer.UnifiedHeader, error)
-+	Overhead() int
- }
- 
- // TLS13CipherSuite provides behavior common to TLS 1.3 cipher suites. TLS 1.3
---- a/internal/ciphersuite/tls_13_record_protection.go
-+++ b/internal/ciphersuite/tls_13_record_protection.go
-@@ -24,6 +24,8 @@ const (
- 	trafficIVLabel13                = "iv"
- 	trafficSequenceNumberKeyLabel13 = "sn"
- 
-+	innerPlaintextContentTypeLen = 1
-+
- 	tls13AEADWriteIVLen  = 12
- 	tls13AES128GCMKeyLen = 16
- 	tls13AES256GCMKeyLen = 32
-@@ -195,6 +197,14 @@ func (r recordTrafficProtection13) sequenceNumberMask(encryptedRecord []byte) ([
- 	return r.sequenceNumberMaskFn(r.sequenceNumberKey, encryptedRecord)
- }
- 
-+func (r *recordTrafficProtection13) Overhead() int {
-+	if r.aead == nil {
-+		return 0
-+	}
-+
-+	return innerPlaintextContentTypeLen + r.aead.Overhead()
-+}
-+
- func (r *recordTrafficProtection13) Seal(
- 	header recordlayer.UnifiedHeader,
- 	sequenceNumber uint64,
+ // readBufferPools caches read buffer pools by size so buffers are reused across
+ // connections. Only a small bounded set of distinct sizes is expected in a
+ // program.

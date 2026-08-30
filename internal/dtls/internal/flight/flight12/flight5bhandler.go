@@ -13,18 +13,11 @@ import (
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
-	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
-func flight5bParse(
-	_ context.Context,
-	_ dtlsflight.Conn,
-	state *dtlsstate.State12,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-) (Flight, *alert.Alert, error) {
+func flight5bParse(_ context.Context, _ dtlsflight.Conn, state *dtlsstate.State12, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig) (Flight, *alert.Alert, error) {
 	pull := cache.FullPullMapItems(state.HandshakeRecvSequence-1, state.CipherSuite,
-		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeFinished, Epoch: cfg.InitialEpoch + 1, IsClient: false, Optional: false}, //nolint:lll
+		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeFinished, Epoch: cfg.InitialEpoch + 1, IsClient: false, Optional: false},
 	)
 	if pull.Err != nil {
 		return 0, nil, pull.Err
@@ -42,29 +35,19 @@ func flight5bParse(
 	return Flight5b, nil, nil
 }
 
-func flight5bGenerate(
-	_ dtlsflight.Conn,
-	state *dtlsstate.State12,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-) ([]*dtlsflight.Packet, *alert.Alert, error) {
-	var pkts []*dtlsflight.Packet
+func flight5bGenerate(_ dtlsflight.Conn, state *dtlsstate.State12, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig) ([]*dtlsflight.Outbound, *alert.Alert, error) {
+	var pkts []*dtlsflight.Outbound
 
 	pkts = append(pkts,
-		&dtlsflight.Packet{
-			Record: &recordlayer.RecordLayer{
-				Header: recordlayer.Header{
-					Version: protocol.Version1_2,
-				},
-				Content: &protocol.ChangeCipherSpec{},
-			},
+		&dtlsflight.Outbound{
+			Content: &protocol.ChangeCipherSpec{},
 		})
 
 	if len(state.LocalVerifyData) == 0 {
 		plainText := cache.PullAndMerge(
-			dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeClientHello, Epoch: cfg.InitialEpoch, IsClient: true, Optional: false},   //nolint:lll
-			dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeServerHello, Epoch: cfg.InitialEpoch, IsClient: false, Optional: false},  //nolint:lll
-			dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeFinished, Epoch: cfg.InitialEpoch + 1, IsClient: false, Optional: false}, //nolint:lll
+			dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeClientHello, Epoch: cfg.InitialEpoch, IsClient: true, Optional: false},
+			dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeServerHello, Epoch: cfg.InitialEpoch, IsClient: false, Optional: false},
+			dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeFinished, Epoch: cfg.InitialEpoch + 1, IsClient: false, Optional: false},
 		)
 
 		var err error
@@ -74,23 +57,7 @@ func flight5bGenerate(
 		}
 	}
 
-	pkts = append(pkts,
-		&dtlsflight.Packet{
-			Record: &recordlayer.RecordLayer{
-				Header: recordlayer.Header{
-					Version: protocol.Version1_2,
-					Epoch:   1,
-				},
-				Content: &handshake.Handshake{
-					Message: &handshake.MessageFinished{
-						VerifyData: state.LocalVerifyData,
-					},
-				},
-			},
-			ShouldEncrypt:            true,
-			ShouldWrapCID:            state.ShouldWrapConnectionID(),
-			ResetLocalSequenceNumber: true,
-		})
+	pkts = append(pkts, &dtlsflight.Outbound{Epoch: 1, Content: &handshake.Handshake{Message: &handshake.MessageFinished{VerifyData: state.LocalVerifyData}}, Protection: dtlsflight.ProtectionCiphertext})
 
 	return pkts, nil, nil
 }

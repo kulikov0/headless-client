@@ -5,9 +5,9 @@
 package handshake
 
 import (
-	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite/types"
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 	"github.com/kulikov0/headless-client/internal/dtls/internal/util"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 )
 
@@ -42,12 +42,7 @@ const (
 // to signal that the message is actually a HelloRetryRequest.
 // See RFC 8446 Section 4.1.3.
 func HelloRetryRequestRandom() []byte {
-	return []byte{
-		0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11,
-		0xBE, 0x1D, 0x8C, 0x02, 0x1E, 0x65, 0xB8, 0x91,
-		0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB, 0x8C, 0x5E,
-		0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C,
-	}
+	return []byte{0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11, 0xBE, 0x1D, 0x8C, 0x02, 0x1E, 0x65, 0xB8, 0x91, 0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB, 0x8C, 0x5E, 0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C}
 }
 
 // String returns the string representation of this type.
@@ -95,6 +90,8 @@ func (t Type) String() string { //nolint:cyclop
 // Message is the body of a Handshake datagram.
 type Message interface {
 	Marshal() ([]byte, error)
+	MarshalTo([]byte) (int, error)
+	MarshalSize() int
 	Unmarshal(data []byte) error
 	Type() Type
 }
@@ -109,12 +106,21 @@ type Handshake struct {
 	Header  Header
 	Message Message
 
-	KeyExchangeAlgorithm types.KeyExchangeAlgorithm
+	KeyExchangeAlgorithm ciphersuite.KeyExchangeAlgorithm
 }
 
 // ContentType returns what kind of content this message is carying.
 func (h Handshake) ContentType() protocol.ContentType {
 	return protocol.ContentTypeHandshake
+}
+
+// MarshalSize returns the minimal buffer size required for MarshalTo.
+func (h *Handshake) MarshalSize() int {
+	if h.Message == nil {
+		return 0
+	}
+
+	return HeaderLength + h.Message.MarshalSize()
 }
 
 // Marshal encodes a handshake into a binary message.
@@ -125,20 +131,46 @@ func (h *Handshake) Marshal() ([]byte, error) {
 		return nil, dtlserrors.ErrUnableToMarshalFragmented
 	}
 
-	msg, err := h.Message.Marshal()
+	message, err := h.Message.Marshal()
 	if err != nil {
 		return nil, err
 	}
 
-	h.Header.Length = uint32(len(msg)) //nolint:gosec // G115
+	out := make([]byte, HeaderLength+len(message))
+	h.Header.Length = uint32(len(message)) //nolint:gosec // handshake messages are bounded to uint24 on the wire.
 	h.Header.FragmentLength = h.Header.Length
 	h.Header.Type = h.Message.Type()
-	header, err := h.Header.Marshal()
-	if err != nil {
+	if _, err = h.Header.MarshalTo(out); err != nil {
 		return nil, err
 	}
+	copy(out[HeaderLength:], message)
 
-	return append(header, msg...), nil
+	return out, nil
+}
+
+// MarshalTo encodes a handshake into a binary message into a pre-allocated buffer.
+func (h *Handshake) MarshalTo(out []byte) (int, error) {
+	if h.Message == nil {
+		return 0, dtlserrors.ErrHandshakeMessageUnset
+	} else if h.Header.FragmentOffset != 0 {
+		return 0, dtlserrors.ErrUnableToMarshalFragmented
+	}
+
+	if len(out) < h.MarshalSize() {
+		return 0, dtlserrors.ErrBufferTooSmall
+	}
+
+	h.Header.Length = uint32(h.Message.MarshalSize()) //nolint:gosec // G115
+	h.Header.FragmentLength = h.Header.Length
+	h.Header.Type = h.Message.Type()
+	n, err := h.Header.MarshalTo(out)
+	if err != nil {
+		return n, err
+	}
+
+	nn, err := h.Message.MarshalTo(out[n:])
+
+	return n + nn, err
 }
 
 // Unmarshal decodes a handshake from a binary message.

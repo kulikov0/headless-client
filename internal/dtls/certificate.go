@@ -7,7 +7,9 @@ import (
 	"crypto/tls"
 
 	dtlsconfig "github.com/kulikov0/headless-client/internal/dtls/internal/config"
+	cryptosuite "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signaturehash"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 )
 
@@ -21,7 +23,7 @@ type ClientHelloInfo struct {
 
 	// CipherSuites lists the CipherSuites supported by the client (e.g.
 	// TLS_AES_128_GCM_SHA256, TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256).
-	CipherSuites []CipherSuiteID
+	CipherSuites []cryptosuite.ID
 
 	// RandomBytes stores the client hello random bytes
 	RandomBytes [handshake.RandomBytesLength]byte
@@ -57,8 +59,5 @@ func (cri *CertificateRequestInfo) SupportsCertificate(certificate *tls.Certific
 		}
 	}
 
-	return (&dtlsconfig.CertificateRequestInfo{
-		AcceptableCAs:    cri.AcceptableCAs,
-		SignatureSchemes: signatureSchemes,
-	}).SupportsCertificate(certificate)
+	return (&dtlsconfig.CertificateRequestInfo{AcceptableCAs: cri.AcceptableCAs, SignatureSchemes: signatureSchemes, Version: protocol.Version1_3}).SupportsCertificate(certificate)
 }

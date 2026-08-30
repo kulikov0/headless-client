@@ -8,8 +8,8 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 
-	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite/types"
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/hash"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signature"
@@ -28,7 +28,7 @@ type MessageServerKeyExchange struct {
 	Signature          []byte
 
 	// for unmarshaling
-	KeyExchangeAlgorithm types.KeyExchangeAlgorithm
+	KeyExchangeAlgorithm ciphersuite.KeyExchangeAlgorithm
 }
 
 // Type returns the Handshake Type.
@@ -36,40 +36,111 @@ func (m MessageServerKeyExchange) Type() Type {
 	return TypeServerKeyExchange
 }
 
-// Marshal encodes the Handshake.
-func (m *MessageServerKeyExchange) Marshal() ([]byte, error) { //nolint:cyclop
-	var out []byte
+// MarshalSize returns the size required for MarshalTo.
+func (m *MessageServerKeyExchange) MarshalSize() int { //nolint:cyclop
+	total := 0
 	if m.IdentityHint != nil {
-		out = append([]byte{0x00, 0x00}, m.IdentityHint...)
-		binary.BigEndian.PutUint16(out, uint16(len(out)-2)) //nolint:gosec //G115
+		total += 2 + len(m.IdentityHint)
 	}
 
 	if m.EllipticCurveType == 0 || len(m.PublicKey) == 0 {
-		return out, nil
+		return total
 	}
-	out = append(out, byte(m.EllipticCurveType), 0x00, 0x00)
-	binary.BigEndian.PutUint16(out[len(out)-2:], uint16(m.NamedCurve))
 
-	//nolint:gosec // G115, no risk of overflow, the biggest supported curve is 97 bytes.
-	out = append(out, byte(len(m.PublicKey)))
-	out = append(out, m.PublicKey...)
+	total += 3
+	total += 1
+	total += len(m.PublicKey)
+
 	switch {
 	case m.HashAlgorithm != hash.None && len(m.Signature) == 0:
-		return nil, dtlserrors.ErrInvalidSignHashAlgorithm
+		return 0
 	case m.HashAlgorithm == hash.None && len(m.Signature) > 0:
-		return nil, dtlserrors.ErrInvalidSignHashAlgorithm
+		return 0
 	case m.SignatureAlgorithm == signature.Anonymous && (m.HashAlgorithm != hash.None || len(m.Signature) > 0):
-		return nil, dtlserrors.ErrInvalidSignHashAlgorithm
+		return 0
 	case m.SignatureAlgorithm == signature.Anonymous:
-		return out, nil
+		return total
+	}
+
+	total += 2 // signature hash length
+	total += 2
+	total += len(m.Signature)
+
+	return total
+}
+
+// MarshalTo encodes the Handshake into a pre-allocated buffer.
+func (m *MessageServerKeyExchange) MarshalTo(out []byte) (int, error) { //nolint:cyclop
+	if err := m.validateMarshal(); err != nil {
+		return 0, err
+	}
+
+	if len(out) < m.MarshalSize() {
+		return 0, dtlserrors.ErrBufferTooSmall
+	}
+
+	offset := 0
+	if m.IdentityHint != nil {
+		binary.BigEndian.PutUint16(out[offset:], uint16(len(m.IdentityHint))) //nolint:gosec //G115
+		offset += 2
+		n := copy(out[offset:], m.IdentityHint)
+		offset += n
+	}
+
+	if m.EllipticCurveType == 0 || len(m.PublicKey) == 0 {
+		return offset, nil
+	}
+	out[offset] = byte(m.EllipticCurveType)
+	offset += 1
+	binary.BigEndian.PutUint16(out[offset:], uint16(m.NamedCurve))
+	offset += 2
+
+	//nolint:gosec // G115, no risk of overflow, the biggest supported curve is 97 bytes.
+	out[offset] = byte(len(m.PublicKey))
+	offset += 1
+	n := copy(out[offset:], m.PublicKey)
+	offset += n
+	if m.SignatureAlgorithm == signature.Anonymous {
+		return offset, nil
 	}
 
 	alg := signaturehash.Algorithm{Hash: m.HashAlgorithm, Signature: m.SignatureAlgorithm}
-	out = append(out, append(alg.Marshal(), []byte{0x00, 0x00}...)...)
-	binary.BigEndian.PutUint16(out[len(out)-2:], uint16(len(m.Signature))) //nolint:gosec // G115
-	out = append(out, m.Signature...)
+	tmp := alg.Marshal()
+	n = copy(out[offset:], tmp)
+	offset += n
+	binary.BigEndian.PutUint16(out[offset:], uint16(len(m.Signature))) //nolint:gosec // G115
+	offset += 2
+	copy(out[offset:], m.Signature)
+
+	return m.MarshalSize(), nil
+}
+
+// Marshal encodes the Handshake.
+func (m *MessageServerKeyExchange) Marshal() ([]byte, error) {
+	if err := m.validateMarshal(); err != nil {
+		return nil, err
+	}
+
+	out := make([]byte, m.MarshalSize())
+	_, err := m.MarshalTo(out)
+	if err != nil {
+		return nil, err
+	}
 
 	return out, nil
+}
+
+func (m *MessageServerKeyExchange) validateMarshal() error {
+	switch {
+	case m.HashAlgorithm != hash.None && len(m.Signature) == 0:
+		return dtlserrors.ErrInvalidSignHashAlgorithm
+	case m.HashAlgorithm == hash.None && len(m.Signature) > 0:
+		return dtlserrors.ErrInvalidSignHashAlgorithm
+	case m.SignatureAlgorithm == signature.Anonymous && (m.HashAlgorithm != hash.None || len(m.Signature) > 0):
+		return dtlserrors.ErrInvalidSignHashAlgorithm
+	default:
+		return nil
+	}
 }
 
 // Unmarshal populates the message from encoded data.
@@ -77,16 +148,16 @@ func (m *MessageServerKeyExchange) Unmarshal(data []byte) error { //nolint:cyclo
 	switch {
 	case len(data) < 2:
 		return dtlserrors.ErrBufferTooSmall
-	case m.KeyExchangeAlgorithm == types.KeyExchangeAlgorithmNone:
+	case m.KeyExchangeAlgorithm == ciphersuite.KeyExchangeAlgorithmNone:
 		return dtlserrors.ErrCipherSuiteUnset
 	}
 
 	hintLength := binary.BigEndian.Uint16(data)
-	if int(hintLength) <= len(data)-2 && m.KeyExchangeAlgorithm.Has(types.KeyExchangeAlgorithmPsk) {
+	if int(hintLength) <= len(data)-2 && m.KeyExchangeAlgorithm.Has(ciphersuite.KeyExchangeAlgorithmPsk) {
 		m.IdentityHint = bytes.Clone(data[2 : 2+hintLength])
 		data = data[2+hintLength:]
 	}
-	if m.KeyExchangeAlgorithm == types.KeyExchangeAlgorithmPsk {
+	if m.KeyExchangeAlgorithm == ciphersuite.KeyExchangeAlgorithmPsk {
 		if len(data) == 0 {
 			return nil
 		}
@@ -94,7 +165,7 @@ func (m *MessageServerKeyExchange) Unmarshal(data []byte) error { //nolint:cyclo
 		return dtlserrors.ErrLengthMismatch
 	}
 
-	if !m.KeyExchangeAlgorithm.Has(types.KeyExchangeAlgorithmEcdhe) {
+	if !m.KeyExchangeAlgorithm.Has(ciphersuite.KeyExchangeAlgorithmEcdhe) {
 		return dtlserrors.ErrLengthMismatch
 	}
 

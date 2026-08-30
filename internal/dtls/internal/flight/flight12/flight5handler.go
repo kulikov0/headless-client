@@ -9,29 +9,22 @@ import (
 	"crypto"
 	"crypto/x509"
 
-	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite"
 	dtlsconfig "github.com/kulikov0/headless-client/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 	dtlsflight "github.com/kulikov0/headless-client/internal/dtls/internal/flight"
 	dtlscrypto "github.com/kulikov0/headless-client/internal/dtls/internal/handshakecrypto"
 	dtlsstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
+	cryptosuite "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/prf"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signaturehash"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
-	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
-func flight5Parse(
-	_ context.Context,
-	conn dtlsflight.Conn,
-	state *dtlsstate.State12,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-) (Flight, *alert.Alert, error) {
+func flight5Parse(_ context.Context, conn dtlsflight.Conn, state *dtlsstate.State12, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig) (Flight, *alert.Alert, error) {
 	pull := cache.FullPullMapItems(state.HandshakeRecvSequence, state.CipherSuite,
-		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeFinished, Epoch: cfg.InitialEpoch + 1, IsClient: false, Optional: false}, //nolint:lll
+		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeFinished, Epoch: cfg.InitialEpoch + 1, IsClient: false, Optional: false},
 	)
 	if pull.Err != nil {
 		return 0, nil, pull.Err
@@ -66,38 +59,33 @@ func flight5Parse(
 }
 
 //nolint:gocognit,cyclop,maintidx
-func flight5Generate(
-	conn dtlsflight.Conn,
-	state *dtlsstate.State12,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-) ([]*dtlsflight.Packet, *alert.Alert, error) {
+func flight5Generate(conn dtlsflight.Conn, state *dtlsstate.State12, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig) ([]*dtlsflight.Outbound, *alert.Alert, error) {
 	var signer crypto.Signer
-	var pkts []*dtlsflight.Packet
+	var pkts []*dtlsflight.Outbound
 	if state.RemoteRequestedCertificate { //nolint:nestif
 		pull := cache.FullPullMapItems(state.HandshakeRecvSequence-2, state.CipherSuite,
-			dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeCertificateRequest, Epoch: cfg.InitialEpoch, IsClient: false, Optional: false}) //nolint:lll
+			dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeCertificateRequest, Epoch: cfg.InitialEpoch, IsClient: false, Optional: false})
 		if pull.Err != nil {
 			return nil, nil, pull.Err
 		}
 		if !pull.Ready {
-			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, dtlserrors.ErrClientCertificateRequired //nolint:lll
+			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, dtlserrors.ErrClientCertificateRequired
 		}
-		reqInfo := dtlsconfig.CertificateRequestInfo{}
+		reqInfo := dtlsconfig.CertificateRequestInfo{Version: protocol.Version1_2}
 		if r, ok2 := pull.Messages[handshake.TypeCertificateRequest].(*handshake.MessageCertificateRequest); ok2 {
 			reqInfo.AcceptableCAs = make([][]byte, len(r.CertificateAuthoritiesNames))
 			for i := range r.CertificateAuthoritiesNames {
 				reqInfo.AcceptableCAs[i] = bytes.Clone(r.CertificateAuthoritiesNames[i])
 			}
 		} else {
-			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, dtlserrors.ErrClientCertificateRequired //nolint:lll
+			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, dtlserrors.ErrClientCertificateRequired
 		}
 		certificate, err := cfg.GetClientCertificate(&reqInfo)
 		if err != nil {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, err
 		}
 		if certificate == nil {
-			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, dtlserrors.ErrNotAcceptableCertificateChain //nolint:lll
+			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, dtlserrors.ErrNotAcceptableCertificateChain
 		}
 		if certificate.Certificate != nil {
 			var ok bool
@@ -106,19 +94,7 @@ func flight5Generate(
 				return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, dtlserrors.ErrInvalidPrivateKey
 			}
 		}
-		pkts = append(pkts,
-			&dtlsflight.Packet{
-				Record: &recordlayer.RecordLayer{
-					Header: recordlayer.Header{
-						Version: protocol.Version1_2,
-					},
-					Content: &handshake.Handshake{
-						Message: &handshake.MessageCertificate{
-							Certificate: certificate.Certificate,
-						},
-					},
-				},
-			})
+		pkts = append(pkts, &dtlsflight.Outbound{Content: &handshake.Handshake{Message: &handshake.MessageCertificate{Certificate: certificate.Certificate}}})
 	}
 
 	clientKeyExchange := &handshake.MessageClientKeyExchange{}
@@ -132,14 +108,9 @@ func flight5Generate(
 	}
 
 	pkts = append(pkts,
-		&dtlsflight.Packet{
-			Record: &recordlayer.RecordLayer{
-				Header: recordlayer.Header{
-					Version: protocol.Version1_2,
-				},
-				Content: &handshake.Handshake{
-					Message: clientKeyExchange,
-				},
+		&dtlsflight.Outbound{
+			Content: &handshake.Handshake{
+				Message: clientKeyExchange,
 			},
 		})
 
@@ -158,7 +129,7 @@ func flight5Generate(
 	merged := []byte{}
 	seqPred := uint16(state.HandshakeSendSequence) //nolint:gosec // G115
 	for _, p := range pkts {
-		h, ok := p.Record.Content.(*handshake.Handshake)
+		h, ok := p.Content.(*handshake.Handshake)
 		if !ok {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, dtlserrors.ErrInvalidContentType
 		}
@@ -186,39 +157,21 @@ func flight5Generate(
 
 		// Find compatible signature scheme
 
-		signatureHashAlgo, err := signaturehash.SelectSignatureScheme(state.RemoteCertRequestAlgs, signer)
+		signatureHashAlgo, err := signaturehash.SelectSignatureScheme(state.RemoteCertRequestAlgs, signer, protocol.Version1_2)
 		if err != nil {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, err
 		}
 
-		certVerify, err := dtlscrypto.GenerateCertificateVerify(
-			plainText,
-			signer,
-			signatureHashAlgo.Hash,
-			signatureHashAlgo.Signature,
-		)
+		certVerify, err := dtlscrypto.GenerateCertificateVerify(plainText, signer, signatureHashAlgo.Hash, signatureHashAlgo.Signature)
 		if err != nil {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 		}
 		state.LocalCertificatesVerify = certVerify
 
-		pkt := &dtlsflight.Packet{
-			Record: &recordlayer.RecordLayer{
-				Header: recordlayer.Header{
-					Version: protocol.Version1_2,
-				},
-				Content: &handshake.Handshake{
-					Message: &handshake.MessageCertificateVerify{
-						HashAlgorithm:      signatureHashAlgo.Hash,
-						SignatureAlgorithm: signatureHashAlgo.Signature,
-						Signature:          state.LocalCertificatesVerify,
-					},
-				},
-			},
-		}
+		pkt := &dtlsflight.Outbound{Content: &handshake.Handshake{Message: &handshake.MessageCertificateVerify{HashAlgorithm: signatureHashAlgo.Hash, SignatureAlgorithm: signatureHashAlgo.Signature, Signature: state.LocalCertificatesVerify}}}
 		pkts = append(pkts, pkt)
 
-		h, ok := pkt.Record.Content.(*handshake.Handshake)
+		h, ok := pkt.Content.(*handshake.Handshake)
 		if !ok {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, dtlserrors.ErrInvalidContentType
 		}
@@ -232,59 +185,28 @@ func flight5Generate(
 	}
 
 	pkts = append(pkts,
-		&dtlsflight.Packet{
-			Record: &recordlayer.RecordLayer{
-				Header: recordlayer.Header{
-					Version: protocol.Version1_2,
-				},
-				Content: &protocol.ChangeCipherSpec{},
-			},
+		&dtlsflight.Outbound{
+			Content: &protocol.ChangeCipherSpec{},
 		})
 
 	if len(state.LocalVerifyData) == 0 {
 		plainText := cache.PullAndMerge(handshakeRulesThroughClientFinished(cfg.InitialEpoch)...)
 
 		var err error
-		state.LocalVerifyData, err = prf.VerifyDataClient(
-			state.MasterSecret,
-			append(plainText, merged...),
-			state.CipherSuite.HashFunc(),
-		)
+		state.LocalVerifyData, err = prf.VerifyDataClient(state.MasterSecret, append(plainText, merged...), state.CipherSuite.HashFunc())
 		if err != nil {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 		}
 	}
 
-	pkts = append(pkts,
-		&dtlsflight.Packet{
-			Record: &recordlayer.RecordLayer{
-				Header: recordlayer.Header{
-					Version: protocol.Version1_2,
-					Epoch:   1,
-				},
-				Content: &handshake.Handshake{
-					Message: &handshake.MessageFinished{
-						VerifyData: state.LocalVerifyData,
-					},
-				},
-			},
-			ShouldWrapCID:            state.ShouldWrapConnectionID(),
-			ShouldEncrypt:            true,
-			ResetLocalSequenceNumber: true,
-		})
+	pkts = append(pkts, &dtlsflight.Outbound{Epoch: 1, Content: &handshake.Handshake{Message: &handshake.MessageFinished{VerifyData: state.LocalVerifyData}}, Protection: dtlsflight.ProtectionCiphertext})
 
 	return pkts, nil, nil
 }
 
 //nolint:gocognit,cyclop
-func initializeCipherSuite(
-	state *dtlsstate.State12,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-	handshakeKeyExchange *handshake.MessageServerKeyExchange,
-	sendingPlainText []byte,
-) (*alert.Alert, error) {
-	if state.CipherSuite.IsInitialized() {
+func initializeCipherSuite(state *dtlsstate.State12, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig, handshakeKeyExchange *handshake.MessageServerKeyExchange, sendingPlainText []byte) (*alert.Alert, error) {
+	if state.Protection != nil {
 		return nil, nil //nolint
 	}
 
@@ -305,18 +227,13 @@ func initializeCipherSuite(
 			return &alert.Alert{Level: alert.Fatal, Description: alert.IllegalParameter}, err
 		}
 	} else {
-		state.MasterSecret, err = prf.MasterSecret(
-			state.PreMasterSecret,
-			clientRandom[:],
-			serverRandom[:],
-			state.CipherSuite.HashFunc(),
-		)
+		state.MasterSecret, err = prf.MasterSecret(state.PreMasterSecret, clientRandom[:], serverRandom[:], state.CipherSuite.HashFunc())
 		if err != nil {
 			return &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 		}
 	}
 
-	if state.CipherSuite.AuthenticationType() == ciphersuite.AuthenticationTypeCertificate { //nolint:nestif
+	if state.CipherSuite.AuthenticationType() == cryptosuite.AuthenticationTypeCertificate { //nolint:nestif
 		// Verify that the pair of hash algorithm and signiture is listed.
 		var validSignatureScheme bool
 		for _, ss := range cfg.LocalSignatureSchemes {
@@ -327,22 +244,11 @@ func initializeCipherSuite(
 			}
 		}
 		if !validSignatureScheme {
-			return &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, dtlserrors.ErrNoAvailableSignatureSchemes //nolint:lll
+			return &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, dtlserrors.ErrNoAvailableSignatureSchemes
 		}
 
-		expectedMsg := dtlscrypto.ValueKeyMessage(
-			clientRandom[:],
-			serverRandom[:],
-			handshakeKeyExchange.PublicKey,
-			handshakeKeyExchange.NamedCurve,
-		)
-		if err = dtlscrypto.VerifyKeySignature(
-			expectedMsg,
-			handshakeKeyExchange.Signature,
-			handshakeKeyExchange.HashAlgorithm,
-			handshakeKeyExchange.SignatureAlgorithm,
-			state.PeerCertificates,
-		); err != nil {
+		expectedMsg := dtlscrypto.ValueKeyMessage(clientRandom[:], serverRandom[:], handshakeKeyExchange.PublicKey, handshakeKeyExchange.NamedCurve)
+		if err = dtlscrypto.VerifyKeySignature(expectedMsg, handshakeKeyExchange.Signature, handshakeKeyExchange.HashAlgorithm, handshakeKeyExchange.SignatureAlgorithm, state.PeerCertificates); err != nil {
 			return &alert.Alert{Level: alert.Fatal, Description: alert.BadCertificate}, err
 		}
 		var chains [][]*x509.Certificate
@@ -370,7 +276,7 @@ func initializeCipherSuite(
 		}
 	}
 
-	if err = state.CipherSuite.Init(state.MasterSecret, clientRandom[:], serverRandom[:], true); err != nil {
+	if err = state.InitCipherSuite(); err != nil {
 		return &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 	}
 

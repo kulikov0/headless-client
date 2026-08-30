@@ -34,7 +34,7 @@ type Generator func(
 	*dtlsstate.State12,
 	*dtlsflight.Cache,
 	*dtlsconfig.HandshakeConfig,
-) ([]*dtlsflight.Packet, *alert.Alert, error)
+) ([]*dtlsflight.Outbound, *alert.Alert, error)
 
 func getFlightParser(f Flight) (flightParser, bool) { //nolint:cyclop
 	switch f {
@@ -88,14 +88,7 @@ func GetGenerator(f Flight) (gen Generator, retransmit bool, ok bool) { //nolint
 	}
 }
 
-func Parse(
-	ctx context.Context,
-	f Flight,
-	conn dtlsflight.Conn,
-	state *dtlsstate.State12,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-) (Flight, *alert.Alert, error, bool) {
+func Parse(ctx context.Context, f Flight, conn dtlsflight.Conn, state *dtlsstate.State12, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig) (Flight, *alert.Alert, error, bool) {
 	parse, ok := getFlightParser(f)
 	if !ok {
 		return 0, nil, nil, false

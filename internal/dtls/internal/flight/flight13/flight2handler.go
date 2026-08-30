@@ -14,7 +14,6 @@ import (
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
 	extension13 "github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension/dtls13"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
-	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
 func flight2Parse( //nolint:cyclop
@@ -24,7 +23,7 @@ func flight2Parse( //nolint:cyclop
 ) (Flight, *alert.Alert, error) {
 	pull := flightCtx.cache.FullPullMapItems(
 		flightCtx.state.HandshakeRecvSequence, flightCtx.state.CipherSuite,
-		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeClientHello, Epoch: flightCtx.cfg.InitialEpoch, IsClient: true, Optional: false}, //nolint:lll
+		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeClientHello, Epoch: flightCtx.cfg.InitialEpoch, IsClient: true, Optional: false},
 	)
 	if pull.Err != nil {
 		return 0, nil, pull.Err
@@ -38,17 +37,14 @@ func flight2Parse( //nolint:cyclop
 		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, nil
 	}
 
-	if !clientHello.Version.Equal(protocol.Version1_2) {
-		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.ProtocolVersion},
-			dtlserrors.ErrUnsupportedProtocolVersion
+	if clientHello.Version != protocol.Version1_2 {
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.ProtocolVersion}, dtlserrors.ErrUnsupportedProtocolVersion
 	}
 	snapshots := flightCtx.state.RemoteClientHelloSnapshots
 	if err := snapshots.RecordWire(pull.Items[0].Raw.Data); err != nil {
 		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.IllegalParameter}, err
 	}
-	if err := negotiation.ValidateClientHelloRetry(
-		snapshots.Initial(), snapshots.Current(), flightCtx.state.HelloRetryRequest,
-	); err != nil {
+	if err := negotiation.ValidateClientHelloRetry(snapshots.Initial(), snapshots.Current(), flightCtx.state.HelloRetryRequest); err != nil {
 		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.IllegalParameter}, err
 	}
 
@@ -70,7 +66,7 @@ func flight2Parse( //nolint:cyclop
 func flight2Generate(
 	_ dtlsflight.Conn,
 	flightCtx *handshakeContext,
-) ([]*dtlsflight.Packet, *alert.Alert, error) {
+) ([]*dtlsflight.Outbound, *alert.Alert, error) {
 	flightCtx.state.HandshakeSendSequence = 0
 	if flightCtx.state.CipherSuite == nil {
 		return nil, nil, dtlserrors.ErrCipherSuiteUnset
@@ -104,30 +100,17 @@ func flight2Generate(
 			Cookie: flightCtx.state.Cookie,
 		})
 	}
-	serverHello := &handshake.MessageServerHello{
-		Version:           protocol.Version1_2,
-		Random:            random,
-		CipherSuiteID:     &cipherSuiteID,
-		CompressionMethod: dtlsflight.DefaultCompressionMethods()[0],
-		Extensions:        exts,
-	}
-	request, err := negotiation.ValidateHelloRetryRequest(
-		flightCtx.state.RemoteClientHelloSnapshots.Initial(), serverHello,
-	)
+	serverHello := &handshake.MessageServerHello{Version: protocol.Version1_2, Random: random, CipherSuiteID: &cipherSuiteID, CompressionMethod: dtlsflight.DefaultCompressionMethods()[0], Extensions: exts}
+	request, err := negotiation.ValidateHelloRetryRequest(flightCtx.state.RemoteClientHelloSnapshots.Initial(), serverHello)
 	if err != nil {
 		return nil, nil, err
 	}
 	flightCtx.state.HelloRetryRequest = request
 
-	return []*dtlsflight.Packet{
+	return []*dtlsflight.Outbound{
 		{
-			Record: &recordlayer.RecordLayer{
-				Header: recordlayer.Header{
-					Version: protocol.Version1_2,
-				},
-				Content: &handshake.Handshake{
-					Message: serverHello,
-				},
+			Content: &handshake.Handshake{
+				Message: serverHello,
 			},
 		},
 	}, nil, nil

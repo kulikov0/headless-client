@@ -12,6 +12,7 @@ import (
 	"time"
 
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	cryptosuite "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
@@ -38,7 +39,7 @@ type Option interface {
 
 type dtlsConfig struct {
 	Certificates                  []tls.Certificate
-	CipherSuites                  []CipherSuiteID
+	CipherSuites                  []cryptosuite.ID
 	SignatureSchemes              []tls.SignatureScheme
 	CertificateSignatureSchemes   []tls.SignatureScheme
 	SRTPProtectionProfiles        []SRTPProtectionProfile
@@ -56,23 +57,24 @@ type dtlsConfig struct {
 	ServerName                    string
 	LoggerFactory                 logging.LoggerFactory
 	MTU                           int
+	ReceiveBufferSize             int
 	ReplayProtectionWindow        int
 	KeyLogWriter                  io.Writer
 	SupportedProtocols            []string
 	EllipticCurves                []elliptic.Curve
 	InsecureSkipVerifyHello       bool
 	ConnectionIDGenerator         func() []byte
+	CIDPathMigrationPolicy        cidPathMigrationPolicy
 	PaddingLengthGenerator        func(uint) uint
 	HelloRandomBytesGenerator     func() [handshake.RandomBytesLength]byte
 	ClientHelloMessageHook        func(handshake.MessageClientHello) handshake.Message
 	ServerHelloMessageHook        func(handshake.MessageServerHello) handshake.Message
 	CertificateRequestMessageHook func(handshake.MessageCertificateRequest) handshake.Message
 	OnConnectionAttempt           func(net.Addr) error
-	ListenConfig                  net.ListenConfig
 	MinVersion                    protocol.Version
 	MaxVersion                    protocol.Version
 
-	customCipherSuites   func() []CipherSuite
+	customCipherSuites   func() []cryptosuite.Suite
 	psk                  PSKCallback
 	verifyConnection     func(*State) error
 	sessionStore         SessionStore
@@ -85,7 +87,9 @@ func (c *dtlsConfig) applyDefaults() {
 	c.ExtendedMasterSecret = RequestExtendedMasterSecret
 	c.FlightInterval = time.Second
 	c.MTU = defaultMTU
+	c.ReceiveBufferSize = defaultReceiveBufferSize
 	c.ReplayProtectionWindow = defaultReplayProtectionWindow
+	c.PaddingLengthGenerator = func(uint) uint { return 0 }
 }
 
 // buildConfig builds a config from the provided options, for mixed client/server cases.
@@ -152,7 +156,7 @@ func WithCertificates(certs ...tls.Certificate) Option {
 
 // WithCipherSuites sets the supported cipher suites.
 // For functional options, an explicitly empty slice is not allowed.
-func WithCipherSuites(suites ...CipherSuiteID) Option {
+func WithCipherSuites(suites ...cryptosuite.ID) Option {
 	return sharedOption(func(c *dtlsConfig) error {
 		if len(suites) == 0 {
 			return dtlserrors.ErrEmptyCipherSuites
@@ -165,7 +169,7 @@ func WithCipherSuites(suites ...CipherSuiteID) Option {
 
 // WithCustomCipherSuites sets the custom cipher suites provider.
 // Returns an error if the provider is nil.
-func WithCustomCipherSuites(fn func() []CipherSuite) Option {
+func WithCustomCipherSuites(fn func() []cryptosuite.Suite) Option {
 	return sharedOption(func(c *dtlsConfig) error {
 		if fn == nil {
 			return dtlserrors.ErrNilCustomCipherSuites
@@ -369,6 +373,26 @@ func WithMTU(mtu int) Option {
 	})
 }
 
+// WithReceiveBufferSize sets the size of the in-memory buffers used to read
+// incoming datagrams. A datagram larger than this size cannot be received —
+// depending on the transport it is truncated or rejected — so it must be at
+// least as large as the largest datagram the peer may send. The default is
+// 8192 bytes.
+//
+// This does not change the kernel socket receive buffer (SO_RCVBUF); use
+// net.UDPConn.SetReadBuffer for that.
+// Returns an error if the size is not positive.
+func WithReceiveBufferSize(size int) Option {
+	return sharedOption(func(c *dtlsConfig) error {
+		if size <= 0 {
+			return dtlserrors.ErrInvalidReceiveBufferSize
+		}
+		c.ReceiveBufferSize = size
+
+		return nil
+	})
+}
+
 // WithReplayProtectionWindow sets the replay protection window size.
 // Returns an error if the window size is negative.
 func WithReplayProtectionWindow(window int) Option {
@@ -440,14 +464,34 @@ func WithGetClientCertificate(fn func(*CertificateRequestInfo) (*tls.Certificate
 	})
 }
 
-// WithConnectionIDGenerator sets the connection ID generator.
-// Returns an error if the generator is nil.
-func WithConnectionIDGenerator(fn func() []byte) Option {
+type cidPathMigrationPolicy uint8
+
+const (
+	// CIDPathMigrationReject retains the current peer address and logs CID path
+	// migration attempts. This is required when no reachability validation
+	// strategy is configured
+	// https://datatracker.ietf.org/doc/html/rfc9146#section-6
+	// https://datatracker.ietf.org/doc/html/rfc9147#section-11
+	CIDPathMigrationReject cidPathMigrationPolicy = iota
+	// CIDPathMigrationUnsafe immediately accepts an authenticated CID path.
+	// It is intended only for transports, such as ICE, that validate paths
+	// outside DTLS.
+	CIDPathMigrationUnsafe
+	// CIDPathMigrationRRC validates a CID path with return routability checks
+	// before accepting it. RRC is advertised and negotiated only in this mode.
+	// https://datatracker.ietf.org/doc/html/rfc9853
+	CIDPathMigrationRRC
+)
+
+// WithConnectionID enables connection IDs and configures how authenticated
+// connection ID records may change the peer address.
+func WithConnectionID(generator func() []byte, policy cidPathMigrationPolicy) Option {
 	return sharedOption(func(c *dtlsConfig) error {
-		if fn == nil {
+		if generator == nil {
 			return dtlserrors.ErrNilConnectionIDGenerator
 		}
-		c.ConnectionIDGenerator = fn
+		c.ConnectionIDGenerator = generator
+		c.CIDPathMigrationPolicy = policy
 
 		return nil
 	})
@@ -496,7 +540,7 @@ func WithClientHelloMessageHook(fn func(handshake.MessageClientHello) handshake.
 // By default, DTLS 1.2 is currently used as the minimum as it's the only supported version.
 func WithMinVersion(version protocol.Version) Option {
 	return sharedOption(func(c *dtlsConfig) error {
-		if version.Equal(protocol.Version1_2) || version.Equal(protocol.Version1_3) {
+		if version == protocol.Version1_2 || version == protocol.Version1_3 {
 			c.MinVersion = version
 
 			return nil
@@ -510,7 +554,7 @@ func WithMinVersion(version protocol.Version) Option {
 // By default, DTLS 1.2 is currently used as the minimum as it's the only supported version.
 func WithMaxVersion(version protocol.Version) Option {
 	return sharedOption(func(c *dtlsConfig) error {
-		if version.Equal(protocol.Version1_2) || version.Equal(protocol.Version1_3) {
+		if version == protocol.Version1_2 || version == protocol.Version1_3 {
 			c.MaxVersion = version
 
 			return nil
@@ -611,16 +655,6 @@ func WithOnConnectionAttempt(fn func(net.Addr) error) ServerOption {
 			return dtlserrors.ErrNilOnConnectionAttempt
 		}
 		c.OnConnectionAttempt = fn
-
-		return nil
-	})
-}
-
-// WithListenConfig sets the underlying listener config.
-// This option is only applicable to servers.
-func WithListenConfig(listenConfig net.ListenConfig) ServerOption {
-	return serverOnlyOption(func(c *dtlsConfig) error {
-		c.ListenConfig = listenConfig
 
 		return nil
 	})

@@ -8,7 +8,6 @@ import (
 	"crypto/rand"
 	"slices"
 
-	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite"
 	dtlsconfig "github.com/kulikov0/headless-client/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 	dtlsflight "github.com/kulikov0/headless-client/internal/dtls/internal/flight"
@@ -29,11 +28,10 @@ func flight0Parse(
 	cfg := flightCtx.cfg
 
 	if state.LocalVersion != protocol.Version1_3 {
-		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError},
-			dtlserrors.ErrInvalidProtocolVersionState
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, dtlserrors.ErrInvalidProtocolVersionState
 	}
 	pull := cache.FullPullMapItems(0, state.CipherSuite,
-		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeClientHello, Epoch: cfg.InitialEpoch, IsClient: true, Optional: false}, //nolint:lll
+		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeClientHello, Epoch: cfg.InitialEpoch, IsClient: true, Optional: false},
 	)
 	if pull.Err != nil {
 		return 0, nil, pull.Err
@@ -57,9 +55,8 @@ func flight0Parse(
 		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, nil
 	}
 
-	if !clientHello.Version.Equal(protocol.Version1_2) {
-		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.ProtocolVersion},
-			dtlserrors.ErrUnsupportedProtocolVersion
+	if clientHello.Version != protocol.Version1_2 {
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.ProtocolVersion}, dtlserrors.ErrUnsupportedProtocolVersion
 	}
 	state.RemoteRandom = clientHello.Random
 
@@ -68,15 +65,12 @@ func flight0Parse(
 		if id == renegotiationInfoSCSV {
 			continue
 		}
-		if c := ciphersuite.ForID(ciphersuite.ID(id), cfg.CustomCipherSuites); c != nil {
+		if c, found := dtlsflight.FindCipherSuiteByID(id, cfg.LocalCipherSuites); found && c.Capabilities().SupportsVersion(protocol.Version1_3) {
 			cipherSuites = append(cipherSuites, c)
 		}
 	}
-
-	// nolint:godox
-	// TODO: check for DTLS 1.3 cipher suites
 	if state.CipherSuite, ok = dtlsflight.FindMatchingCipherSuite(cipherSuites, cfg.LocalCipherSuites); !ok {
-		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, dtlserrors.ErrCipherSuiteNoIntersection //nolint:lll
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, dtlserrors.ErrCipherSuiteNoIntersection
 	}
 
 	if failure := processClientHelloExtensions(state, clientHello); failure != nil {
@@ -86,8 +80,7 @@ func flight0Parse(
 	if !slices.Contains(state.RemoteVersions, protocol.Version1_3) {
 		// nolint:godox
 		// TODO: This should actually handover the state machine to DTLS 1.2
-		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError},
-			dtlserrors.ErrInvalidProtocolVersionState
+		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, dtlserrors.ErrInvalidProtocolVersionState
 	}
 
 	nextFlight := Flight2
@@ -119,7 +112,7 @@ func flight0Parse(
 func flight0Generate(
 	_ dtlsflight.Conn,
 	flightCtx *handshakeContext,
-) ([]*dtlsflight.Packet, *alert.Alert, error) {
+) ([]*dtlsflight.Outbound, *alert.Alert, error) {
 	state := flightCtx.state
 	cfg := flightCtx.cfg
 	state.SetSRTPProtectionProfile(0)

@@ -12,6 +12,7 @@ import (
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 	dtlsstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
 	dtlsutil "github.com/kulikov0/headless-client/internal/dtls/internal/util"
+	cryptosuite "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/prf"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
@@ -23,6 +24,7 @@ type State struct {
 	localEpoch, remoteEpoch   uint16
 	localRandom, remoteRandom handshake.Random
 	masterSecret              []byte
+	cipherSuiteDescriptor     cryptosuite.Suite
 	sequenceNumber            uint64
 	srtpProtectionProfile     SRTPProtectionProfile
 	peerSRTPMKI               []byte
@@ -32,7 +34,7 @@ type State struct {
 	isClient                  bool
 	version                   protocol.Version
 
-	CipherSuiteID      CipherSuiteID
+	CipherSuiteID      cryptosuite.ID
 	PeerCertificates   [][]byte
 	IdentityHint       []byte
 	SessionID          []byte
@@ -64,7 +66,7 @@ func generateState(internalState *dtlsstate.State) (*State, error) {
 	if internalState.CipherSuite == nil {
 		return nil, dtlserrors.ErrCipherSuiteNotSet
 	}
-	if internalState.LocalVersion.Equal(protocol.Version1_3) {
+	if internalState.LocalVersion == protocol.Version1_3 {
 		return nil, ErrStateSerializationUnsupported
 	}
 
@@ -90,6 +92,7 @@ func generateState(internalState *dtlsstate.State) (*State, error) {
 		isClient:              internalState.IsClient,
 		version:               protocol.Version1_2,
 		CipherSuiteID:         internalState.CipherSuite.ID(),
+		cipherSuiteDescriptor: internalState.CipherSuite,
 		PeerCertificates:      internalState.PeerCertificates,
 		IdentityHint:          internalState.IdentityHint,
 		SessionID:             internalState.SessionID,
@@ -137,6 +140,7 @@ func generateState13(internalState *dtlsstate.State13) (*State, error) {
 		isClient:              common.IsClient,
 		version:               protocol.Version1_3,
 		CipherSuiteID:         internalState.CipherSuite.ID(),
+		cipherSuiteDescriptor: internalState.CipherSuite,
 		PeerCertificates:      dtlsutil.CloneByteSlices(common.PeerCertificates),
 		IdentityHint:          bytes.Clone(common.IdentityHint),
 		SessionID:             bytes.Clone(common.SessionID),
@@ -144,17 +148,43 @@ func generateState13(internalState *dtlsstate.State13) (*State, error) {
 	}, nil
 }
 
+// NegotiatedVersion returns the DTLS version negotiated for this connection.
+func (s *State) NegotiatedVersion() protocol.Version {
+	return s.version
+}
+
+// Role indicates which side of the DTLS handshake an endpoint took.
+type Role uint8
+
+const (
+	// RoleUnknown is the zero value, used when the role is not yet resolved.
+	RoleUnknown Role = iota
+	// RoleClient is the endpoint that sends the ClientHello.
+	RoleClient
+	// RoleServer is the endpoint that answers with the ServerHello.
+	RoleServer
+)
+
+// Role reports which side of the handshake the local endpoint took.
+func (s *State) Role() Role {
+	if s.isClient {
+		return RoleClient
+	}
+
+	return RoleServer
+}
+
 func (s *State) serialize() (*serializedState, error) {
 	// 0 (TLS_NULL_WITH_NULL_NULL) is never negotiated, so it signals an unset suite.
 	if s.CipherSuiteID == 0 {
 		return nil, dtlserrors.ErrCipherSuiteNotSet
 	}
-	if s.version.Equal(protocol.Version1_3) {
+	if s.version == protocol.Version1_3 {
 		return nil, ErrStateSerializationUnsupported
 	}
 
 	version := s.version
-	if version.Equal(protocol.Version{}) {
+	if version == 0 {
 		version = protocol.Version1_2
 	}
 
@@ -181,8 +211,9 @@ func (s *State) serialize() (*serializedState, error) {
 }
 
 func (s *State) deserialize(serialized serializedState) {
+	s.cipherSuiteDescriptor = nil
 	s.version = serialized.Version
-	if s.version.Equal(protocol.Version{}) {
+	if s.version == 0 {
 		s.version = protocol.Version1_2
 	}
 	s.localEpoch = serialized.LocalEpoch
@@ -198,32 +229,27 @@ func (s *State) deserialize(serialized serializedState) {
 	s.rrcNegotiated = serialized.RRCNegotiated
 	s.isClient = serialized.IsClient
 
-	s.CipherSuiteID = CipherSuiteID(serialized.CipherSuiteID)
+	s.CipherSuiteID = cryptosuite.ID(serialized.CipherSuiteID)
 	s.PeerCertificates = serialized.PeerCertificates
 	s.IdentityHint = serialized.IdentityHint
 	s.SessionID = serialized.SessionID
 	s.NegotiatedProtocol = serialized.NegotiatedProtocol
 }
 
-func (s *State) initializedCipherSuite() (CipherSuite, error) {
-	cipherSuite := ciphersuite.ForID(s.CipherSuiteID, nil)
+func (s *State) cipherSuite() (cryptosuite.Suite, error) {
+	cipherSuite := s.cipherSuiteDescriptor
+	if cipherSuite == nil {
+		cipherSuite = nil
+	} else if cipherSuite.ID() != s.CipherSuiteID {
+		return nil, dtlserrors.ErrInvalidCipherSuite
+	}
+	if cipherSuite == nil {
+		cipherSuite = ciphersuite.ForID(s.CipherSuiteID)
+	}
 	if cipherSuite == nil {
 		return nil, dtlserrors.ErrCipherSuiteNotSet
 	}
-	if cipherSuite.IsInitialized() {
-		return cipherSuite, nil
-	}
-
-	localRandom := s.localRandom.MarshalFixed()
-	remoteRandom := s.remoteRandom.MarshalFixed()
-
-	var err error
-	if s.isClient {
-		err = cipherSuite.Init(s.masterSecret, localRandom[:], remoteRandom[:], true)
-	} else {
-		err = cipherSuite.Init(s.masterSecret, remoteRandom[:], localRandom[:], false)
-	}
-	if err != nil {
+	if err := validateCipherSuite(cipherSuite); err != nil {
 		return nil, err
 	}
 
@@ -236,15 +262,23 @@ func (s *State) generateInternalState() (*dtlsstate.State, error) {
 	if s.CipherSuiteID == 0 {
 		return nil, dtlserrors.ErrCipherSuiteNotSet
 	}
-	if s.version.Equal(protocol.Version1_3) {
+	if s.version == protocol.Version1_3 {
 		return nil, ErrStateSerializationUnsupported
+	}
+
+	cipherSuite, err := s.cipherSuite()
+	if err != nil {
+		return nil, err
+	}
+	if !cipherSuite.Capabilities().SupportsVersion(protocol.Version1_2) {
+		return nil, dtlserrors.ErrInvalidCipherSuite
 	}
 
 	state := &dtlsstate.State{
 		Common: &dtlsstate.Common{
 			LocalRandom:        s.localRandom,
 			RemoteRandom:       s.remoteRandom,
-			CipherSuite:        ciphersuite.ForID(s.CipherSuiteID, nil),
+			CipherSuite:        cipherSuite,
 			RemoteConnectionID: s.remoteConnectionID,
 			RRCNegotiated:      s.rrcNegotiated,
 			IsClient:           s.isClient,
@@ -297,15 +331,22 @@ func (s *State) UnmarshalBinary(data []byte) error {
 	if err := enc.Decode(&serialized); err != nil {
 		return err
 	}
-	if serialized.Version.Equal(protocol.Version1_3) {
+	if serialized.Version == protocol.Version1_3 {
 		return ErrStateSerializationUnsupported
 	}
 
 	s.deserialize(serialized)
+	if s.CipherSuiteID == 0 {
+		return dtlserrors.ErrCipherSuiteNotSet
+	}
+	if len(s.masterSecret) == 0 {
+		return dtlserrors.ErrInvalidProtectionInput
+	}
+	if cipherSuite := ciphersuite.ForID(s.CipherSuiteID); cipherSuite != nil && (!cipherSuite.Capabilities().SupportsVersion(protocol.Version1_2) || validateCipherSuite(cipherSuite) != nil) {
+		return dtlserrors.ErrInvalidCipherSuite
+	}
 
-	_, err := s.initializedCipherSuite()
-
-	return err
+	return nil
 }
 
 // ExportKeyingMaterial returns length bytes of exported key material in a new
@@ -320,7 +361,7 @@ func (s *State) ExportKeyingMaterial(label string, context []byte, length int) (
 	} else if _, ok := invalidKeyingLabels()[label]; ok {
 		return nil, dtlserrors.ErrReservedExportKeyingMaterial
 	}
-	cipherSuite, err := s.initializedCipherSuite()
+	cipherSuite, err := s.cipherSuite()
 	if err != nil {
 		return nil, err
 	}

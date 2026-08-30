@@ -53,7 +53,7 @@ import (
 
 type fsm12 struct {
 	currentFlight      dtlsflight12.Flight
-	flights            []*dtlsflight.Packet
+	flights            []*dtlsflight.Outbound
 	retransmit         bool
 	retransmitInterval time.Duration
 	state              *dtlsstate.State12
@@ -63,25 +63,8 @@ type fsm12 struct {
 	establishment      *Establishment
 }
 
-func NewFSM12(
-	state *dtlsstate.State12,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-	initialFlight dtlsflight12.Flight,
-	initialFlights []*dtlsflight.Packet,
-	establishment *Establishment,
-) FSM {
-	return &fsm12{
-		currentFlight:      initialFlight,
-		flights:            initialFlights,
-		retransmit:         initialFlights != nil,
-		state:              state,
-		cache:              cache,
-		cfg:                cfg,
-		retransmitInterval: cfg.InitialRetransmitInterval,
-		closed:             make(chan struct{}),
-		establishment:      establishment,
-	}
+func NewFSM12(state *dtlsstate.State12, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig, initialFlight dtlsflight12.Flight, initialFlights []*dtlsflight.Outbound, establishment *Establishment) FSM {
+	return &fsm12{currentFlight: initialFlight, flights: initialFlights, retransmit: initialFlights != nil, state: state, cache: cache, cfg: cfg, retransmitInterval: cfg.InitialRetransmitInterval, closed: make(chan struct{}), establishment: establishment}
 }
 
 func (s *fsm12) Run(ctx context.Context, conn Conn, initialState State) error {
@@ -116,7 +99,7 @@ func (s *fsm12) prepare(ctx context.Context, conn Conn) (State, error) {
 	var (
 		dtlsAlert *alert.Alert
 		err       error
-		pkts      []*dtlsflight.Packet
+		pkts      []*dtlsflight.Outbound
 	)
 	gen, retransmit, ok := dtlsflight12.GetGenerator(s.currentFlight)
 	if !ok {
@@ -134,11 +117,11 @@ func (s *fsm12) prepare(ctx context.Context, conn Conn) (State, error) {
 	epoch := s.cfg.InitialEpoch
 	nextEpoch := epoch
 	for _, p := range s.flights {
-		p.Record.Header.Epoch += epoch
-		if p.Record.Header.Epoch > nextEpoch {
-			nextEpoch = p.Record.Header.Epoch
+		p.Epoch += epoch
+		if p.Epoch > nextEpoch {
+			nextEpoch = p.Epoch
 		}
-		if h, ok := p.Record.Content.(*handshake.Handshake); ok {
+		if h, ok := p.Content.(*handshake.Handshake); ok {
 			h.Header.MessageSequence = uint16(s.state.HandshakeSendSequence) //nolint:gosec // G115
 			s.state.HandshakeSendSequence++
 		}
@@ -204,12 +187,7 @@ func (s *fsm12) wait(ctx context.Context, conn Conn) (State, error) { //nolint:g
 			if nextFlight == 0 {
 				break
 			}
-			s.cfg.Log.Tracef(
-				"[handshake:%s] %s -> %s",
-				sideString(s.state.IsClient),
-				s.currentFlight.String(),
-				nextFlight.String(),
-			)
+			s.cfg.Log.Tracef("[handshake:%s] %s -> %s", sideString(s.state.IsClient), s.currentFlight.String(), nextFlight.String())
 			if nextFlight.IsLastRecvFlight() && s.currentFlight == nextFlight {
 				return StateFinished, nil
 			}

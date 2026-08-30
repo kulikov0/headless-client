@@ -18,6 +18,9 @@ type OfferedVersions struct {
 // ExtensionType returns the IANA extension type.
 func (OfferedVersions) ExtensionType() extension.Type { return extension.TypeSupportedVersions }
 
+// MarshalSize returns the encoded payload size without serializing it.
+func (o OfferedVersions) MarshalSize() int { return 1 + (2 * len(o.Versions)) }
+
 // MarshalData encodes extension_data.
 func (o OfferedVersions) MarshalData() ([]byte, error) {
 	length := len(o.Versions) * 2
@@ -28,7 +31,7 @@ func (o OfferedVersions) MarshalData() ([]byte, error) {
 	out := make([]byte, 1, 1+length)
 	out[0] = byte(length) //nolint:gosec // length is bounded above.
 	for _, version := range o.Versions {
-		out = append(out, version.Major, version.Minor)
+		out = append(out, version.Major(), version.Minor())
 	}
 
 	return out, nil
@@ -42,7 +45,7 @@ func (o *OfferedVersions) UnmarshalData(data []byte) error {
 
 	o.Versions = o.Versions[:0]
 	for offset := 1; offset+1 < len(data); offset += 2 {
-		o.Versions = append(o.Versions, protocol.Version{Major: data[offset], Minor: data[offset+1]})
+		o.Versions = append(o.Versions, protocol.VersionFromBytes(data[offset], data[offset+1]))
 	}
 
 	return nil
@@ -57,9 +60,12 @@ type SelectedVersion struct {
 // ExtensionType returns the IANA extension type.
 func (SelectedVersion) ExtensionType() extension.Type { return extension.TypeSupportedVersions }
 
+// MarshalSize returns the encoded payload size.
+func (SelectedVersion) MarshalSize() int { return 2 }
+
 // MarshalData encodes extension_data.
 func (s SelectedVersion) MarshalData() ([]byte, error) {
-	return []byte{s.Version.Major, s.Version.Minor}, nil
+	return []byte{s.Version.Major(), s.Version.Minor()}, nil
 }
 
 // UnmarshalData decodes extension_data.
@@ -68,7 +74,7 @@ func (s *SelectedVersion) UnmarshalData(data []byte) error {
 		return dtlserrors.ErrInvalidSupportedVersionsFormat
 	}
 
-	s.Version = protocol.Version{Major: data[0], Minor: data[1]}
+	s.Version = protocol.VersionFromBytes(data[0], data[1])
 
 	return nil
 }

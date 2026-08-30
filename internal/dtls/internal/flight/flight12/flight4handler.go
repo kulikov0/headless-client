@@ -10,7 +10,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 
-	"github.com/kulikov0/headless-client/internal/dtls/internal/ciphersuite"
 	dtlsconfig "github.com/kulikov0/headless-client/internal/dtls/internal/config"
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 	dtlsflight "github.com/kulikov0/headless-client/internal/dtls/internal/flight"
@@ -18,6 +17,7 @@ import (
 	"github.com/kulikov0/headless-client/internal/dtls/internal/negotiation"
 	dtlsstate "github.com/kulikov0/headless-client/internal/dtls/internal/state"
 	"github.com/kulikov0/headless-client/internal/dtls/internal/util"
+	cryptosuite "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/clientcertificate"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/prf"
@@ -27,21 +27,14 @@ import (
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension"
 	extension12 "github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension/dtls12"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
-	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/recordlayer"
 )
 
-//nolint:gocognit,gocyclo,lll,cyclop,maintidx
-func flight4Parse(
-	ctx context.Context,
-	conn dtlsflight.Conn,
-	state *dtlsstate.State12,
-	cache *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-) (Flight, *alert.Alert, error) {
+//nolint:gocognit,gocyclo,cyclop,maintidx
+func flight4Parse(ctx context.Context, conn dtlsflight.Conn, state *dtlsstate.State12, cache *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig) (Flight, *alert.Alert, error) {
 	pull := cache.FullPullMapItems(state.HandshakeRecvSequence, state.CipherSuite,
-		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeCertificate, Epoch: cfg.InitialEpoch, IsClient: true, Optional: true},        //nolint:lll
-		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeClientKeyExchange, Epoch: cfg.InitialEpoch, IsClient: true, Optional: false}, //nolint:lll
-		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeCertificateVerify, Epoch: cfg.InitialEpoch, IsClient: true, Optional: true},  //nolint:lll
+		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeCertificate, Epoch: cfg.InitialEpoch, IsClient: true, Optional: true},
+		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeClientKeyExchange, Epoch: cfg.InitialEpoch, IsClient: true, Optional: false},
+		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeCertificateVerify, Epoch: cfg.InitialEpoch, IsClient: true, Optional: true},
 	)
 	if pull.Err != nil {
 		return 0, nil, pull.Err
@@ -88,13 +81,7 @@ func flight4Parse(
 			return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, dtlserrors.ErrNoAvailableSignatureSchemes
 		}
 
-		if err := dtlscrypto.VerifyCertificateVerify(
-			plainText,
-			verify.HashAlgorithm,
-			verify.SignatureAlgorithm,
-			verify.Signature,
-			state.PeerCertificates,
-		); err != nil {
+		if err := dtlscrypto.VerifyCertificateVerify(plainText, verify.HashAlgorithm, verify.SignatureAlgorithm, verify.Signature, state.PeerCertificates); err != nil {
 			return 0, &alert.Alert{Level: alert.Fatal, Description: alert.BadCertificate}, err
 		}
 		var chains [][]*x509.Certificate
@@ -123,39 +110,30 @@ func flight4Parse(
 		return 0, nil, nil
 	}
 
-	if !state.CipherSuite.IsInitialized() { //nolint:nestif
+	if state.Protection == nil { //nolint:nestif
 		serverRandom := state.LocalRandom.MarshalFixed()
 		clientRandom := state.RemoteRandom.MarshalFixed()
 
 		var err error
 		var preMasterSecret []byte
-		if state.CipherSuite.AuthenticationType() == ciphersuite.AuthenticationTypePreSharedKey {
+		if state.CipherSuite.AuthenticationType() == cryptosuite.AuthenticationTypePreSharedKey {
 			var psk []byte
 			if psk, err = cfg.LocalPSKCallback(bytes.Clone(clientKeyExchange.IdentityHint)); err != nil {
 				return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 			}
 			state.IdentityHint = bytes.Clone(clientKeyExchange.IdentityHint)
 			switch state.CipherSuite.KeyExchangeAlgorithm() {
-			case ciphersuite.KeyExchangeAlgorithmPsk:
+			case cryptosuite.KeyExchangeAlgorithmPsk:
 				preMasterSecret = prf.PSKPreMasterSecret(psk)
-			case (ciphersuite.KeyExchangeAlgorithmPsk | ciphersuite.KeyExchangeAlgorithmEcdhe):
-				if preMasterSecret, err = prf.EcdhePSKPreMasterSecret(
-					psk,
-					clientKeyExchange.PublicKey,
-					state.LocalKeypair.PrivateKey,
-					state.LocalKeypair.Curve,
-				); err != nil {
+			case (cryptosuite.KeyExchangeAlgorithmPsk | cryptosuite.KeyExchangeAlgorithmEcdhe):
+				if preMasterSecret, err = prf.EcdhePSKPreMasterSecret(psk, clientKeyExchange.PublicKey, state.LocalKeypair.PrivateKey, state.LocalKeypair.Curve); err != nil {
 					return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 				}
 			default:
 				return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, dtlserrors.ErrInvalidCipherSuite
 			}
 		} else {
-			preMasterSecret, err = prf.PreMasterSecret(
-				clientKeyExchange.PublicKey,
-				state.LocalKeypair.PrivateKey,
-				state.LocalKeypair.Curve,
-			)
+			preMasterSecret, err = prf.PreMasterSecret(clientKeyExchange.PublicKey, state.LocalKeypair.PrivateKey, state.LocalKeypair.Curve)
 			if err != nil {
 				return 0, &alert.Alert{Level: alert.Fatal, Description: alert.IllegalParameter}, err
 			}
@@ -173,18 +151,13 @@ func flight4Parse(
 				return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 			}
 		} else {
-			state.MasterSecret, err = prf.MasterSecret(
-				preMasterSecret,
-				clientRandom[:],
-				serverRandom[:],
-				state.CipherSuite.HashFunc(),
-			)
+			state.MasterSecret, err = prf.MasterSecret(preMasterSecret, clientRandom[:], serverRandom[:], state.CipherSuite.HashFunc())
 			if err != nil {
 				return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 			}
 		}
 
-		if err := state.CipherSuite.Init(state.MasterSecret, clientRandom[:], serverRandom[:], false); err != nil {
+		if err := state.InitCipherSuite(); err != nil {
 			return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 		}
 		cfg.WriteKeyLog(keyLogLabel, clientRandom[:], state.MasterSecret)
@@ -203,7 +176,7 @@ func flight4Parse(
 	}
 
 	finishedPull := cache.FullPullMapItems(pull.NextSequence, state.CipherSuite,
-		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeFinished, Epoch: cfg.InitialEpoch + 1, IsClient: true, Optional: false}, //nolint:lll
+		dtlsflight.HandshakeCachePullRule{Typ: handshake.TypeFinished, Epoch: cfg.InitialEpoch + 1, IsClient: true, Optional: false},
 	)
 	if finishedPull.Err != nil {
 		return 0, nil, finishedPull.Err
@@ -218,7 +191,7 @@ func flight4Parse(
 		return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, nil
 	}
 
-	if state.CipherSuite.AuthenticationType() == ciphersuite.AuthenticationTypeAnonymous {
+	if state.CipherSuite.AuthenticationType() == cryptosuite.AuthenticationTypeAnonymous {
 		if cfg.VerifyConnection != nil {
 			if err := cfg.VerifyConnection(state); err != nil {
 				return 0, &alert.Alert{Level: alert.Fatal, Description: alert.BadCertificate}, err
@@ -257,23 +230,15 @@ func flight4Parse(
 }
 
 //nolint:gocognit,cyclop,maintidx
-func flight4Generate(
-	_ dtlsflight.Conn,
-	state *dtlsstate.State12,
-	_ *dtlsflight.Cache,
-	cfg *dtlsconfig.HandshakeConfig,
-) ([]*dtlsflight.Packet, *alert.Alert, error) {
+func flight4Generate(_ dtlsflight.Conn, state *dtlsstate.State12, _ *dtlsflight.Cache, cfg *dtlsconfig.HandshakeConfig) ([]*dtlsflight.Outbound, *alert.Alert, error) {
 	offer := state.RemoteClientHelloSnapshots.Current()
 	extensions := []extension.Value{}
-	srtpSelection, err := negotiation.NegotiateSRTP(
-		offer, cfg.LocalSRTPProtectionProfiles, cfg.LocalSRTPMasterKeyIdentifier,
-	)
+	srtpSelection, err := negotiation.NegotiateSRTP(offer, cfg.LocalSRTPProtectionProfiles, cfg.LocalSRTPMasterKeyIdentifier)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if (cfg.ExtendedMasterSecret == dtlsconfig.RequestExtendedMasterSecret ||
-		cfg.ExtendedMasterSecret == dtlsconfig.RequireExtendedMasterSecret) && state.ExtendedMasterSecret {
+	if (cfg.ExtendedMasterSecret == dtlsconfig.RequestExtendedMasterSecret || cfg.ExtendedMasterSecret == dtlsconfig.RequireExtendedMasterSecret) && state.ExtendedMasterSecret {
 		extensions = append(extensions, &extension12.ExtendedMasterSecret{})
 	}
 	extensions = appendSRTPSelection(extensions, srtpSelection)
@@ -282,11 +247,8 @@ func flight4Generate(
 			RenegotiatedConnection: 0,
 		})
 	}
-	if state.CipherSuite.AuthenticationType() == ciphersuite.AuthenticationTypeCertificate &&
-		offer.Offered(extension.TypeSupportedPointFormats) {
-		extensions = append(extensions, &extension12.SupportedPointFormats{
-			PointFormats: []elliptic.CurvePointFormat{elliptic.CurvePointFormatUncompressed},
-		})
+	if state.CipherSuite.AuthenticationType() == cryptosuite.AuthenticationTypeCertificate && offer.Offered(extension.TypeSupportedPointFormats) {
+		extensions = append(extensions, &extension12.SupportedPointFormats{PointFormats: []elliptic.CurvePointFormat{elliptic.CurvePointFormatUncompressed}})
 	}
 
 	selectedProto, err := extension.ALPNProtocolSelection(cfg.SupportedProtocols, state.PeerSupportedProtocols)
@@ -299,13 +261,10 @@ func flight4Generate(
 	}
 
 	if cid := serverCIDExtension(state, cfg, offer); cid != nil {
-		extensions = append(extensions, cid)
-		if offer.Offered(extension.TypeReturnRoutabilityCheck) {
-			extensions = append(extensions, &extension.ReturnRoutabilityCheck{})
-		}
+		extensions = dtlsflight.AppendConnectionIDExtensions(extensions, cid.CID, cfg.EnableRRC && offer.Offered(extension.TypeReturnRoutabilityCheck))
 	}
 
-	var pkts []*dtlsflight.Packet
+	var pkts []*dtlsflight.Outbound
 	cipherSuiteID := uint16(state.CipherSuite.ID())
 
 	if cfg.HasSessionStore {
@@ -315,59 +274,32 @@ func flight4Generate(
 		}
 	}
 
-	serverHello := &handshake.MessageServerHello{
-		Version:           protocol.Version1_2,
-		Random:            state.LocalRandom,
-		SessionID:         state.SessionID,
-		CipherSuiteID:     &cipherSuiteID,
-		CompressionMethod: dtlsflight.DefaultCompressionMethods()[0],
-		Extensions:        extensions,
-	}
+	serverHello := &handshake.MessageServerHello{Version: protocol.Version1_2, Random: state.LocalRandom, SessionID: state.SessionID, CipherSuiteID: &cipherSuiteID, CompressionMethod: dtlsflight.DefaultCompressionMethods()[0], Extensions: extensions}
 
-	serverHello, err = negotiation.FinalizeServerHello(serverHello, cfg.ServerHelloMessageHook, offer)
+	serverHello, err = dtlsflight.FinalizeServerHello(
+		serverHello, cfg.ServerHelloMessageHook, offer, cfg.EnableRRC,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err = validateServerSRTP(
-		offer, serverHello.Extensions, cfg.LocalSRTPProtectionProfiles, srtpSelection,
-	); err != nil {
+	if err = validateServerSRTP(offer, serverHello.Extensions, cfg.LocalSRTPProtectionProfiles, srtpSelection); err != nil {
 		return nil, nil, err
 	}
 	decision := negotiation.DecideConnectionID(offer, serverHello.Extensions)
 	content := handshake.Handshake{Message: serverHello}
 
-	pkts = append(pkts, &dtlsflight.Packet{
-		Record: &recordlayer.RecordLayer{
-			Header: recordlayer.Header{
-				Version: protocol.Version1_2,
-			},
-			Content: &content,
-		},
+	pkts = append(pkts, &dtlsflight.Outbound{
+		Content: &content,
 	})
 
 	switch {
-	case state.CipherSuite.AuthenticationType() == ciphersuite.AuthenticationTypeCertificate:
-		certificate, err := cfg.GetCertificate(&dtlsconfig.ClientHelloInfo{
-			ServerName:   state.ServerName,
-			CipherSuites: []ciphersuite.ID{state.CipherSuite.ID()},
-			RandomBytes:  state.RemoteRandom.RandomBytes,
-		})
+	case state.CipherSuite.AuthenticationType() == cryptosuite.AuthenticationTypeCertificate:
+		certificate, err := cfg.GetCertificate(&dtlsconfig.ClientHelloInfo{ServerName: state.ServerName, CipherSuites: []cryptosuite.ID{state.CipherSuite.ID()}, RandomBytes: state.RemoteRandom.RandomBytes})
 		if err != nil {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, err
 		}
 
-		pkts = append(pkts, &dtlsflight.Packet{
-			Record: &recordlayer.RecordLayer{
-				Header: recordlayer.Header{
-					Version: protocol.Version1_2,
-				},
-				Content: &handshake.Handshake{
-					Message: &handshake.MessageCertificate{
-						Certificate: certificate.Certificate,
-					},
-				},
-			},
-		})
+		pkts = append(pkts, &dtlsflight.Outbound{Content: &handshake.Handshake{Message: &handshake.MessageCertificate{Certificate: certificate.Certificate}}})
 
 		serverRandom := state.LocalRandom.MarshalFixed()
 		clientRandom := state.RemoteRandom.MarshalFixed()
@@ -378,40 +310,24 @@ func flight4Generate(
 		}
 
 		// Find compatible signature scheme
-		signatureHashAlgo, err := signaturehash.SelectSignatureScheme(cfg.LocalSignatureSchemes, signer)
+		signatureHashAlgo, err := signaturehash.SelectSignatureScheme(
+			cfg.LocalSignatureSchemes,
+			signer,
+			protocol.Version1_2,
+		)
 		if err != nil {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, err
 		}
 
-		signature, err := dtlscrypto.GenerateKeySignature(
-			clientRandom[:],
-			serverRandom[:],
-			state.LocalKeypair.PublicKey,
-			state.NamedCurve,
-			signer,
-			signatureHashAlgo.Hash,
-			signatureHashAlgo.Signature,
-		)
+		signature, err := dtlscrypto.GenerateKeySignature(clientRandom[:], serverRandom[:], state.LocalKeypair.PublicKey, state.NamedCurve, signer, signatureHashAlgo.Hash, signatureHashAlgo.Signature)
 		if err != nil {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 		}
 		state.LocalKeySignature = signature
 
-		pkts = append(pkts, &dtlsflight.Packet{
-			Record: &recordlayer.RecordLayer{
-				Header: recordlayer.Header{
-					Version: protocol.Version1_2,
-				},
-				Content: &handshake.Handshake{
-					Message: &handshake.MessageServerKeyExchange{
-						EllipticCurveType:  elliptic.CurveTypeNamedCurve,
-						NamedCurve:         state.NamedCurve,
-						PublicKey:          state.LocalKeypair.PublicKey,
-						HashAlgorithm:      signatureHashAlgo.Hash,
-						SignatureAlgorithm: signatureHashAlgo.Signature,
-						Signature:          state.LocalKeySignature,
-					},
-				},
+		pkts = append(pkts, &dtlsflight.Outbound{
+			Content: &handshake.Handshake{
+				Message: &handshake.MessageServerKeyExchange{EllipticCurveType: elliptic.CurveTypeNamedCurve, NamedCurve: state.NamedCurve, PublicKey: state.LocalKeypair.PublicKey, HashAlgorithm: signatureHashAlgo.Hash, SignatureAlgorithm: signatureHashAlgo.Signature, Signature: state.LocalKeySignature},
 			},
 		})
 
@@ -429,11 +345,7 @@ func flight4Generate(
 				certificateAuthorities = cfg.ClientCAs.Subjects()
 			}
 
-			certReq := &handshake.MessageCertificateRequest{
-				CertificateTypes:            []clientcertificate.Type{clientcertificate.RSASign, clientcertificate.ECDSASign},
-				SignatureHashAlgorithms:     cfg.LocalSignatureSchemes,
-				CertificateAuthoritiesNames: certificateAuthorities,
-			}
+			certReq := &handshake.MessageCertificateRequest{CertificateTypes: []clientcertificate.Type{clientcertificate.RSASign, clientcertificate.ECDSASign}, SignatureHashAlgorithms: cfg.LocalSignatureSchemes, CertificateAuthoritiesNames: certificateAuthorities}
 
 			var content handshake.Handshake
 
@@ -443,17 +355,12 @@ func flight4Generate(
 				content = handshake.Handshake{Message: certReq}
 			}
 
-			pkts = append(pkts, &dtlsflight.Packet{
-				Record: &recordlayer.RecordLayer{
-					Header: recordlayer.Header{
-						Version: protocol.Version1_2,
-					},
-					Content: &content,
-				},
+			pkts = append(pkts, &dtlsflight.Outbound{
+				Content: &content,
 			})
 		}
 	case cfg.LocalPSKIdentityHint != nil ||
-		state.CipherSuite.KeyExchangeAlgorithm().Has(ciphersuite.KeyExchangeAlgorithmEcdhe):
+		state.CipherSuite.KeyExchangeAlgorithm().Has(cryptosuite.KeyExchangeAlgorithmEcdhe):
 		// To help the client in selecting which identity to use, the server
 		// can provide a "PSK identity hint" in the ServerKeyExchange message.
 		// If no hint is provided and cipher suite doesn't use elliptic curve,
@@ -463,31 +370,21 @@ func flight4Generate(
 		srvExchange := &handshake.MessageServerKeyExchange{
 			IdentityHint: cfg.LocalPSKIdentityHint,
 		}
-		if state.CipherSuite.KeyExchangeAlgorithm().Has(ciphersuite.KeyExchangeAlgorithmEcdhe) {
+		if state.CipherSuite.KeyExchangeAlgorithm().Has(cryptosuite.KeyExchangeAlgorithmEcdhe) {
 			srvExchange.EllipticCurveType = elliptic.CurveTypeNamedCurve
 			srvExchange.NamedCurve = state.NamedCurve
 			srvExchange.PublicKey = state.LocalKeypair.PublicKey
 		}
-		pkts = append(pkts, &dtlsflight.Packet{
-			Record: &recordlayer.RecordLayer{
-				Header: recordlayer.Header{
-					Version: protocol.Version1_2,
-				},
-				Content: &handshake.Handshake{
-					Message: srvExchange,
-				},
+		pkts = append(pkts, &dtlsflight.Outbound{
+			Content: &handshake.Handshake{
+				Message: srvExchange,
 			},
 		})
 	}
 
-	pkts = append(pkts, &dtlsflight.Packet{
-		Record: &recordlayer.RecordLayer{
-			Header: recordlayer.Header{
-				Version: protocol.Version1_2,
-			},
-			Content: &handshake.Handshake{
-				Message: &handshake.MessageServerHelloDone{},
-			},
+	pkts = append(pkts, &dtlsflight.Outbound{
+		Content: &handshake.Handshake{
+			Message: &handshake.MessageServerHelloDone{},
 		},
 	})
 	state.CommitNegotiatedExtensions(decision)
@@ -496,7 +393,7 @@ func flight4Generate(
 	return pkts, nil, nil
 }
 
-func serverCIDExtension(state *dtlsstate.State12, cfg *dtlsconfig.HandshakeConfig, offer negotiation.ClientHelloSnapshot) *extension.ConnectionID { //nolint:lll
+func serverCIDExtension(state *dtlsstate.State12, cfg *dtlsconfig.HandshakeConfig, offer negotiation.ClientHelloSnapshot) *extension.ConnectionID {
 	if cfg.ConnectionIDGenerator == nil || !offer.Offered(extension.TypeConnectionID) {
 		return nil
 	}

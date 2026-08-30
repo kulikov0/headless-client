@@ -199,6 +199,62 @@ func TestVendoredDTLSCallsTheServerHelloHookOnVersion13(t *testing.T) {
 	}
 }
 
+func dtlsLoopbackHookedServerHello(
+	t *testing.T,
+	clientOptions []dtls.ClientOption,
+	serverOptions []dtls.ServerOption,
+) []extension.Type {
+	t.Helper()
+
+	emitted := make(chan []extension.Type, 4)
+	hooked := dtls.WithServerHelloMessageHook(func(serverHello handshake.MessageServerHello) handshake.Message {
+		message := ChromeWindows.dtlsServerHelloHook(serverHello)
+		select {
+		case emitted <- serverHelloExtensionOrder(message):
+		default:
+		}
+
+		return message
+	})
+	runDTLSLoopback(t, clientOptions, append(serverOptions, hooked))
+
+	select {
+	case order := <-emitted:
+		return order
+	default:
+		t.Fatal("the profile server hello hook never ran")
+	}
+
+	return nil
+}
+
+func TestVendoredDTLSServerHelloCarriesTheChromeOrderOnVersion13(t *testing.T) {
+	order := dtlsLoopbackHookedServerHello(t, nil, nil)
+
+	want := []extension.Type{extension.TypeKeyShare, extension.TypeSupportedVersions}
+	if !slices.Equal(order, want) {
+		t.Fatalf("the 1.3 server hello leaves pion with %v, chrome sends %v; an extension outside chromeDTLS13ServerHelloExtensionOrder trails the canonical ones", order, want)
+	}
+}
+
+func TestVendoredDTLSServerHelloCarriesTheChromeOrderOnVersion12(t *testing.T) {
+	protectionProfile := dtls.SRTP_AES128_CM_HMAC_SHA1_80
+	order := dtlsLoopbackHookedServerHello(t,
+		[]dtls.ClientOption{dtls.WithMaxVersion(protocol.Version1_2), dtls.WithSRTPProtectionProfiles(protectionProfile)},
+		[]dtls.ServerOption{dtls.WithSRTPProtectionProfiles(protectionProfile)},
+	)
+
+	want := []extension.Type{
+		extension.TypeExtendedMasterSecret,
+		extension.TypeRenegotiationInfo,
+		extension.TypeSupportedPointFormats,
+		extension.TypeUseSRTP,
+	}
+	if !slices.Equal(order, want) {
+		t.Fatalf("the 1.2 server hello leaves pion with %v, chrome sends %v; the loopback never reaches the 1.2 branch of the hook if this list is shorter", order, want)
+	}
+}
+
 func TestVendoredDTLSFillsTheHandshakeDatagramToTheMTU(t *testing.T) {
 	const maximumTransmissionUnit = 200
 
@@ -252,6 +308,8 @@ func TestVendoredDTLSMimicryEmitsTheChromeExtensionSet(t *testing.T) {
 	defer silent.Close()
 
 	captured := make(chan []uint16, 4)
+	capturedCipherSuites := make(chan []uint16, 4)
+	capturedKeyShareGroups := make(chan []uint16, 4)
 	handshakeContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -262,11 +320,21 @@ func TestVendoredDTLSMimicryEmitsTheChromeExtensionSet(t *testing.T) {
 			hooked := profile.dtls13MimicHook(clientHello)
 			if message, ok := hooked.(*handshake.MessageClientHello); ok {
 				types := make([]uint16, 0, len(message.Extensions))
+				groups := make([]uint16, 0, 2)
 				for _, value := range message.Extensions {
 					types = append(types, uint16(value.ExtensionType()))
+					keyShare, ok := value.(*dtls13.ClientKeyShare)
+					if !ok {
+						continue
+					}
+					for _, share := range keyShare.Shares {
+						groups = append(groups, uint16(share.Group))
+					}
 				}
 				select {
 				case captured <- types:
+					capturedCipherSuites <- message.CipherSuiteIDs
+					capturedKeyShareGroups <- groups
 				default:
 				}
 			}
@@ -288,5 +356,14 @@ func TestVendoredDTLSMimicryEmitsTheChromeExtensionSet(t *testing.T) {
 		}
 	default:
 		t.Fatal("no client hello reached the mimicry hook")
+	}
+
+	if cipherSuites := <-capturedCipherSuites; !slices.Equal(cipherSuites, chromeDTLS13CipherSuiteIDs) {
+		t.Fatalf("mimicry offers cipher suites %v, chrome offers %v", cipherSuites, chromeDTLS13CipherSuiteIDs)
+	}
+
+	wantGroups := []uint16{x25519MLKEM768Group, x25519Group}
+	if groups := <-capturedKeyShareGroups; !slices.Equal(groups, wantGroups) {
+		t.Fatalf("mimicry offers key shares for %v, chrome offers %v; pion changed its default groups and the mimicry filter no longer matches", groups, wantGroups)
 	}
 }

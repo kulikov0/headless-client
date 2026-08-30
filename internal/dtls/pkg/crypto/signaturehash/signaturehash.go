@@ -15,6 +15,7 @@ import (
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/hash"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/signature"
+	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
 )
 
 // Algorithm is a signature/hash algorithm pairs which may be used in
@@ -64,14 +65,34 @@ func Algorithms() []Algorithm {
 	}
 }
 
-// SelectSignatureScheme returns most preferred and compatible scheme for DTLS <= 1.2.
-func SelectSignatureScheme(sigs []Algorithm, privateKey crypto.PrivateKey) (Algorithm, error) {
-	return selectSignatureScheme(sigs, privateKey, false)
-}
+// SelectSignatureScheme returns the most preferred compatible scheme for version.
+func SelectSignatureScheme(sigs []Algorithm, privateKey crypto.PrivateKey, version protocol.Version) (Algorithm, error) {
+	signer, ok := privateKey.(crypto.Signer)
+	if !ok {
+		return Algorithm{}, dtlserrors.ErrInvalidPrivateKey
+	}
 
-// SelectSignatureScheme13 returns most preferred and compatible scheme for DTLS 1.3.
-func SelectSignatureScheme13(sigs []Algorithm, privateKey crypto.PrivateKey) (Algorithm, error) {
-	return selectSignatureScheme(sigs, privateKey, true)
+	is13 := version == protocol.Version1_3
+	for _, ss := range sigs {
+		// RSA-PSS is only supported in DTLS 1.3.
+		if !is13 && ss.Signature.IsPSS() {
+			continue
+		}
+		// TLS 1.3 CertificateVerify signatures made with RSA keys must use
+		// RSASSA-PSS.
+		if is13 && ss.Signature == signature.RSA {
+			continue
+		}
+		// Skip schemes understood but not supported by pion/dtls.
+		if ss.Signature.IsUnsupported() {
+			continue
+		}
+		if ss.isCompatible(signer) {
+			return ss, nil
+		}
+	}
+
+	return Algorithm{}, dtlserrors.ErrNoAvailableSignatureSchemes
 }
 
 // isCompatible checks that given private key is compatible with the signature scheme.
@@ -92,10 +113,6 @@ func (a *Algorithm) isCompatible(signer crypto.Signer) bool {
 // ParseSignatureSchemes translates []tls.SignatureScheme to []signatureHashAlgorithm.
 // It returns default signature scheme list if no SignatureScheme is passed.
 // This function handles both TLS 1.2 byte-split encoding and TLS 1.3 PSS full uint16 schemes.
-//
-// For DTLS 1.2 / TLS 1.2, this returns Algorithms() which excludes TLS 1.3-specific
-// schemes like RSA-PSS for compatibility with implementations like OpenSSL.
-// When DTLS 1.3 is implemented, use Algorithms13() or create ParseSignatureSchemes13().
 func ParseSignatureSchemes(sigs []tls.SignatureScheme, insecureHashes bool) ([]Algorithm, error) {
 	if len(sigs) == 0 {
 		return Algorithms(), nil

@@ -12,6 +12,7 @@ import (
 	"os"
 
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	cryptosuite "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/alert"
 )
 
@@ -20,11 +21,11 @@ var ErrConnClosed = dtlserrors.ErrConnClosed
 
 // ErrStateSerializationUnsupported indicates that the negotiated DTLS version
 // cannot be represented by the public DTLS 1.2-shaped State snapshot.
-var ErrStateSerializationUnsupported = errors.New("dtls: state serialization unsupported for this protocol version") //nolint:gochecknoglobals,lll
+var ErrStateSerializationUnsupported = errors.New("dtls: state serialization unsupported for this protocol version") //nolint:gochecknoglobals
 
 // errInvalidCipherSuite indicates an attempt at using an unsupported cipher suite.
 type invalidCipherSuiteError struct {
-	id CipherSuiteID
+	id cryptosuite.ID
 }
 
 func (e *invalidCipherSuiteError) Error() string {
