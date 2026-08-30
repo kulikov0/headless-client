@@ -75,6 +75,7 @@ func (p Profile) applyWebRTC(settingEngine *webrtc.SettingEngine) {
 	settingEngine.SetSRTPProtectionProfiles(chromeSRTPProtectionProfiles...)
 	settingEngine.SetICETimeouts(pionDefaultICEDisconnectedTimeout, pionDefaultICEFailedTimeout, chromeICEKeepaliveInterval)
 	settingEngine.SetDTLSServerHelloMessageHook(p.dtlsServerHelloHook)
+	settingEngine.SetDTLSInsecureSkipHelloVerify(true)
 	if p.dtls13Mimic {
 		settingEngine.SetDTLSClientHelloMessageHook(p.dtls13MimicHook)
 		return

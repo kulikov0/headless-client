@@ -3,6 +3,7 @@ package headless
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -13,6 +14,36 @@ import (
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/extension/dtls13"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol/handshake"
 )
+
+func settingEngineSkipsHelloVerify(t *testing.T, profile Profile) bool {
+	t.Helper()
+
+	settingEngine, err := profile.SettingEngine()
+	if err != nil {
+		t.Fatalf("setting engine: %v", err)
+	}
+	field := reflect.ValueOf(settingEngine).FieldByName("dtls").FieldByName("insecureSkipHelloVerify")
+	if !field.IsValid() {
+		t.Fatal("webrtc.SettingEngine no longer carries dtls.insecureSkipHelloVerify, the vendored tree changed and this guard needs rewriting")
+	}
+
+	return field.Bool()
+}
+
+func TestSettingEngineNeverAnswersWithAHelloVerifyRequest(t *testing.T) {
+	profiles := []struct {
+		name    string
+		profile Profile
+	}{
+		{"default", ChromeWindows},
+		{"dtls13 mimicry", ChromeWindows.WithDTLS13Mimicry()},
+	}
+	for _, candidate := range profiles {
+		if !settingEngineSkipsHelloVerify(t, candidate.profile) {
+			t.Fatalf("%s profile answers a ClientHello with a cookie, chrome never does and the extra round trip is visible by counting dtls message types", candidate.name)
+		}
+	}
+}
 
 func pionDefaultClientHello(randomByte byte) handshake.MessageClientHello {
 	var random handshake.Random
