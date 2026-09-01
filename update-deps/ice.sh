@@ -15,19 +15,7 @@ if [ ! -d "$SRC" ]; then
   exit 1
 fi
 
-apply_patch() {
-  patch_file="$1"
-  patch_name="$(basename "$patch_file")"
-  if patch -p1 -d "$DST" -N --dry-run -s < "$patch_file" >/dev/null 2>&1; then
-    patch -p1 -d "$DST" -N -s < "$patch_file"
-    echo "applied $patch_name"
-  elif patch -p1 -d "$DST" -R --dry-run -s < "$patch_file" >/dev/null 2>&1; then
-    echo "skipped $patch_name, already present in the source"
-  else
-    echo "cannot apply $patch_name" >&2
-    exit 1
-  fi
-}
+. "$UD/common.sh"
 
 rm -rf "$DST"
 mkdir -p "$(dirname "$DST")"
@@ -43,7 +31,7 @@ grep -rl "$OLD_ICE" "$DST" --include='*.go' | while read -r f; do
   perl -pi -e "s#\\Q$OLD_ICE\\E#$NEW_ICE#g" "$f"
 done
 
-apply_patch "$UD/ice-keepalive-interval.patch"
+apply_patch "$DST" "$UD/ice-keepalive-interval.patch"
 
 if grep -rq "$OLD_ICE" "$DST" --include='*.go'; then
   echo "residual $OLD_ICE references remain" >&2

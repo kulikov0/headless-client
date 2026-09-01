@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+UD="$REPO/update-deps"
 VERSION="${1:-v4.2.11}"
 DST="$REPO/webrtc"
 OLD_WEBRTC="github.com/pion/webrtc/v4"
@@ -10,6 +11,8 @@ OLD_ICE="github.com/pion/ice/v4"
 NEW_WEBRTC="github.com/kulikov0/headless-client/webrtc"
 NEW_DTLS="github.com/kulikov0/headless-client/internal/dtls"
 NEW_ICE="github.com/kulikov0/headless-client/internal/ice"
+
+. "$UD/common.sh"
 
 go -C "$REPO" mod download "$OLD_WEBRTC@$VERSION"
 SRC="$(go env GOMODCACHE)/$OLD_WEBRTC@$VERSION"
@@ -37,6 +40,8 @@ if grep -rq "$OLD_WEBRTC\|$OLD_DTLS\|$OLD_ICE" "$DST" --include='*.go'; then
 fi
 
 gofmt -w "$DST"
+
+apply_patch "$DST" "$UD/webrtc-header-extension-order.patch"
 
 go -C "$REPO" build ./webrtc/...
 echo "webrtc regenerated from $OLD_WEBRTC@$VERSION"

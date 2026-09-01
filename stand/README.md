@@ -122,7 +122,7 @@ Each capture directory contains the following files for every role:
 | File | Contents |
 | --- | --- |
 | `<role>.pcap` | Packets on the host end of the role's veth pair. |
-| `<role>.loopback.pcap` | Packets on the loopback interface inside the role's namespace. Traffic between two processes in the same role appears here and not in `<role>.pcap`. |
+| `<role>.loopback.pcap` | Packets on the loopback interface inside the role's namespace. Traffic between two processes in the same role appears here. `<role>.pcap` does not contain it. |
 | `<role>.keys` | TLS session keys in `SSLKEYLOGFILE` format. Use them to decrypt the pcap. |
 | `<role>.stdout.log` | Standard output and standard error of the role. |
 | `<role>.tcpdump.log` | Standard error of tcpdump. Check this if a pcap is empty. |
@@ -212,9 +212,9 @@ contain `curl`.
 
 Look in `<role>.loopback.pcap` instead of `<role>.pcap`. The main capture runs on
 the host end of the veth pair and does not see traffic that stays on the loopback
-interface. Two processes in the same role reach each other over loopback, and so
-do two sockets in one process, including two `RTCPeerConnection` objects in one
-browser tab.
+interface. Two processes in the same role reach each other over loopback. Two
+sockets in one process do the same, including two `RTCPeerConnection` objects in
+one browser tab.
 
 ### The browser stream does not load
 

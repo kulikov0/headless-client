@@ -7,6 +7,8 @@ UD="$REPO/update-deps"
 DST="$REPO/internal/chromehttp2"
 MOD="github.com/kulikov0/headless-client/internal/chromehttp2"
 
+. "$UD/common.sh"
+
 go -C "$REPO" mod download "golang.org/x/net@$VERSION"
 SRC="$(go env GOMODCACHE)/golang.org/x/net@$VERSION"
 if [ ! -d "$SRC" ]; then
@@ -36,7 +38,7 @@ grep -rl 'golang.org/x/net/internal/httpcommon\|golang.org/x/net/internal/httpsf
 done
 perl -pi -e 's#^package http2 // import "golang.org/x/net/http2"#package http2#' "$DST/http2.go"
 
-patch -p1 -d "$DST" < "$UD/chromehttp2-fingerprint.patch"
+apply_patch "$DST" "$UD/chromehttp2-fingerprint.patch"
 
 cp "$UD/_chromehttp2-tests/chrome_fingerprint_test.go" "$DST/chrome_fingerprint_test.go"
 cp "$UD/_chromehttp2-tests/httpcommon/header_order_test.go" "$DST/internal/httpcommon/header_order_test.go"

@@ -1,0 +1,102 @@
+--- a/mediaengine.go	2026-08-31 20:24:56
++++ b/mediaengine.go	2026-08-31 20:24:56
+@@ -8,11 +8,13 @@
+ import (
+ 	"errors"
+ 	"fmt"
++	"sort"
+ 	"strconv"
+ 	"strings"
+ 	"sync"
+ 	"time"
+ 
++	"github.com/kulikov0/headless-client/internal/rtpext"
+ 	"github.com/kulikov0/headless-client/webrtc/internal/fmtp"
+ 	"github.com/pion/rtp"
+ 	"github.com/pion/rtp/codecs"
+@@ -39,6 +41,7 @@
+ 
+ 	headerExtensions           []mediaEngineHeaderExtension
+ 	negotiatedHeaderExtensions map[int]mediaEngineHeaderExtension
++	headerExtensionIDs         rtpext.Picker
+ 
+ 	mu sync.RWMutex
+ }
+@@ -753,46 +756,51 @@
+ 			}
+ 		}
+ 	} else {
+-		mediaHeaderExtensions := make(map[int]mediaEngineHeaderExtension)
++		for id := range m.negotiatedHeaderExtensions {
++			m.headerExtensionIDs.Reserve(m.negotiatedHeaderExtensions[id].uri, id)
++		}
++
+ 		for _, ext := range m.headerExtensions {
+-			usingNegotiatedID := false
+-			for id := range m.negotiatedHeaderExtensions {
+-				if m.negotiatedHeaderExtensions[id].uri == ext.uri {
+-					usingNegotiatedID = true
+-					mediaHeaderExtensions[id] = ext
+-
+-					break
+-				}
++			if !haveRTPTransceiverDirectionIntersection(ext.allowedDirections, directions) ||
++				!(ext.isAudio && typ == RTPCodecTypeAudio || ext.isVideo && typ == RTPCodecTypeVideo) {
++				continue
+ 			}
+-			if !usingNegotiatedID {
+-				for id := 1; id < 15; id++ {
+-					idAvailable := true
+-					if _, ok := mediaHeaderExtensions[id]; ok {
+-						idAvailable = false
+-					}
+-					if _, taken := m.negotiatedHeaderExtensions[id]; idAvailable && !taken {
+-						mediaHeaderExtensions[id] = ext
+ 
+-						break
+-					}
+-				}
++			id := m.headerExtensionIDs.Suggest(ext.uri, rtpext.PreferredID(ext.uri, typ == RTPCodecTypeVideo))
++			if id == 0 {
++				continue
+ 			}
+-		}
+ 
+-		for id, e := range mediaHeaderExtensions {
+-			if haveRTPTransceiverDirectionIntersection(e.allowedDirections, directions) &&
+-				(e.isAudio && typ == RTPCodecTypeAudio || e.isVideo && typ == RTPCodecTypeVideo) {
+-				headerExtensions = append(headerExtensions, RTPHeaderExtensionParameter{ID: id, URI: e.uri})
+-			}
++			headerExtensions = append(headerExtensions, RTPHeaderExtensionParameter{ID: id, URI: ext.uri})
+ 		}
+ 	}
+ 
++	sortHeaderExtensionsByCanonicalOrder(headerExtensions, typ == RTPCodecTypeVideo)
++
+ 	return RTPParameters{
+ 		HeaderExtensions: headerExtensions,
+ 		Codecs:           foundCodecs,
+ 	}
+ }
+ 
++func sortHeaderExtensionsByCanonicalOrder(headerExtensions []RTPHeaderExtensionParameter, video bool) {
++	sort.SliceStable(headerExtensions, func(first, second int) bool {
++		firstPosition := rtpext.CanonicalPosition(headerExtensions[first].URI, video)
++		secondPosition := rtpext.CanonicalPosition(headerExtensions[second].URI, video)
++		if firstPosition < 0 && secondPosition < 0 {
++			return headerExtensions[first].URI < headerExtensions[second].URI
++		}
++		if firstPosition < 0 {
++			return false
++		}
++		if secondPosition < 0 {
++			return true
++		}
++
++		return firstPosition < secondPosition
++	})
++}
++
+ func (m *MediaEngine) getRTPParametersByPayloadType(payloadType PayloadType) (RTPParameters, error) {
+ 	codec, typ, err := m.getCodecByPayload(payloadType)
+ 	if err != nil {

@@ -15,8 +15,8 @@ internal/chromehttp1 is not vendored. Edit it directly. See
 - internal/dtls: a fork of github.com/pion/dtls/v3 with DTLS 1.3.
 - internal/ice: github.com/pion/ice/v4 with the keepalive interval patch.
 - webrtc: github.com/pion/webrtc/v4 with its dtls and ice imports pointed at
-  internal/dtls and internal/ice. No other change. It is at the top level
-  because consumers import it.
+  internal/dtls and internal/ice, and the RTP header extension patch. It is at
+  the top level because consumers import it.
 - internal/chromehttp2: the http2, internal/httpcommon, and internal/httpsfv
   packages of golang.org/x/net, with the HTTP/2 fingerprint patch.
 - websocket: github.com/gorilla/websocket with the Chrome handshake patch. It is
@@ -50,8 +50,8 @@ Steps:
    dtls-handshake-fragment-mtu.patch and dtls-serverhello13-hook.patch.
 6. Build internal/dtls.
 
-Changes this module makes on top of upstream are stored in update-deps, not in
-the source tree.
+Changes this module makes on top of upstream are stored in update-deps as patch
+files. The vendored source tree holds no hand edits.
 
 Patch application is idempotent. If a patch is already applied in the source,
 the script skips it instead of failing. A source with the local change and a
@@ -91,7 +91,8 @@ Steps:
 3. Rewrite github.com/pion/webrtc/v4 to the webrtc path,
    github.com/pion/dtls/v3 to internal/dtls, and github.com/pion/ice/v4 to
    internal/ice.
-4. Build webrtc.
+4. Apply webrtc-header-extension-order.patch.
+5. Build webrtc.
 
 ## chromehttp2.sh
 
@@ -169,13 +170,13 @@ It runs a loopback handshake and reads supported_versions off the ClientHello.
 
 Changes prepareDualStackServerHandshakeStart in internal/dtls/conn.go.
 
-Upstream calls primeHandshakeRecv on the dual-stack client path but not on the
-dual-stack server path. Without the call, the server blocks until its
+Upstream calls primeHandshakeRecv on the dual-stack client path. The dual-stack
+server path has no such call. Without the call, the server blocks until its
 retransmit timer fires, and a handshake between two dual-stack peers fails with
 a context deadline. The patch adds the same postSetup call that upstream
 already uses for the client.
 
-Applied by dtls.sh. Not in upstream as of pion/dtls commit 16fcc843.
+Applied by dtls.sh. The patch is not in upstream as of pion/dtls commit 16fcc843.
 
 The guard is TestVendoredDTLSCompletesADualStackHandshake in
 dtls_vendor_test.go. Without the patch the server side of that handshake ends
@@ -199,6 +200,37 @@ Changes internal/chromehttp2/transport.go, which controls the SETTINGS frame
 and the connection window update, and internal/httpcommon/request.go, which
 controls pseudo-header order, content-length position, and chromeHeaderOrder.
 Applied by chromehttp2.sh.
+
+## webrtc-header-extension-order.patch
+
+Changes getRTPParametersByKind in webrtc/mediaengine.go and adds a field to
+MediaEngine that holds the identifier picker. Applied by webrtc.sh.
+
+Upstream collects the offered header extensions in a map and then ranges over
+it, so the a=extmap lines come out in a different order in every offer. It also
+allocates identifiers by scanning up from 1. libwebrtc walks a fixed list and
+allocates from the top of the one byte range downwards, so its offers are
+identical every time and its identifiers differ from ours. The patch changes
+both. The lines are emitted in the order of the list in internal/rtpext, and the
+identifiers come from rtpext.Picker.
+
+The tables in internal/rtpext come from media/engine/webrtc_video_engine.cc and
+media/engine/webrtc_voice_engine.cc in webrtc. The allocation rule comes from
+RtpHeaderExtensionPicker::SuggestMapping in call/payload_type_picker.cc. A URI
+that was already given an identifier keeps it in every later media section, an
+unused preferred identifier is taken as is, and anything else is allocated from
+the top of the one byte range downwards.
+
+The patch is applied after gofmt. The import rewrite in step 3 moves one import
+line and gofmt moves it back. A patch generated from the formatted tree does not
+apply to the unformatted tree.
+
+The guards are TestOfferCarriesTheChromeHeaderExtensionOrderAndIDs and
+TestTwoOffersCarryTheSameHeaderExtensionOrder in rtpext_vendor_test.go. The
+first builds an offer through the public API and compares the extmap lines of
+both media sections against a browser capture. Removing the sort call changes
+the order of the video section. Reversing the direction of the picker scan gives
+toffset the identifier 5 instead of 14.
 
 ## _dtls-files
 
@@ -238,6 +270,6 @@ The scripts regenerate source. Module versions are in go.mod. If a new upstream
 version needs a newer dependency, the build fails with an undefined symbol. Run
 go get for that dependency, then run the script again.
 
-webrtc v4.2.11 needs github.com/pion/sctp v1.9.4 and ice v4.2.2. ice is vendored
-rather than downloaded, so its version lives in the VERSION variable of ice.sh
-and not in go.mod.
+webrtc v4.2.11 needs github.com/pion/sctp v1.9.4 and ice v4.2.2. ice is
+vendored, so its version does not appear in go.mod. The version lives in the
+VERSION variable of ice.sh.

@@ -15,19 +15,7 @@ if [ ! -d "$SRC" ]; then
   exit 1
 fi
 
-apply_patch() {
-  patch_file="$1"
-  if patch -d "$REPO" -p1 -N --dry-run --silent <"$patch_file" >/dev/null 2>&1; then
-    patch -d "$REPO" -p1 -N --silent <"$patch_file"
-    return
-  fi
-  if patch -d "$REPO" -p1 -R --dry-run --silent <"$patch_file" >/dev/null 2>&1; then
-    echo "already applied, skipping $(basename "$patch_file")"
-    return
-  fi
-  echo "cannot apply $(basename "$patch_file")" >&2
-  exit 1
-}
+. "$UD/common.sh"
 
 rm -rf "$DST"
 cp -R "$SRC" "$DST"
@@ -47,7 +35,7 @@ if grep -rq "$OLD" "$DST" --include='*.go'; then
   exit 1
 fi
 
-apply_patch "$UD/websocket-chrome-handshake.patch"
+apply_patch "$REPO" "$UD/websocket-chrome-handshake.patch"
 
 gofmt -w "$DST"
 

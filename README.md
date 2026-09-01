@@ -55,7 +55,8 @@ The package is named `headless`.
 - WebRTC: DTLS ClientHello extension shuffling, optional DTLS 1.3 mimicry,
   ServerHello extension order on both DTLS versions, no HelloVerifyRequest,
   handshake fragments sized so the datagram fills the MTU, SRTP profile order,
-  ICE credential shape, ICE keepalive interval.
+  RTP header extension set, identifiers and order, ICE credential shape, ICE
+  keepalive interval.
 - TCP: keepalive disabled, as in Chrome.
 
 ## Usage
@@ -125,6 +126,32 @@ api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
 
 Apply caller settings after the call. A pion setting applied later overwrites an
 earlier one.
+
+`RegisterHeaderExtensions` registers Chrome's RTP header extensions on a
+`webrtc.MediaEngine`. pion registers none by default.
+
+```go
+mediaEngine := &webrtc.MediaEngine{}
+if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+	return err
+}
+if err := headless.ChromeWindows.RegisterHeaderExtensions(mediaEngine); err != nil {
+	return err
+}
+
+api := webrtc.NewAPI(
+	webrtc.WithSettingEngine(settingEngine),
+	webrtc.WithMediaEngine(mediaEngine),
+)
+```
+
+The method registers four extensions for audio and thirteen for video. The
+identifiers and the order of the `a=extmap` lines match Chrome. They hold across
+renegotiation.
+
+Interceptor helpers such as `RegisterDefaultInterceptors` register some of the
+same extensions. Registration is keyed on the URI, so the second registration
+reuses the first entry.
 
 ### Profiles
 
@@ -226,17 +253,17 @@ The following gaps are scheduled. Gaps that will not be addressed are under
 
 - HTTP/3 and QUIC are not implemented.
 - Accept-Language is fixed to ru-RU. Chrome reads this value from a per-locale
-  resource rather than deriving it, so a table is required.
+  resource. It does not derive the value, so a table is required.
 - sec-ch-ua-platform is the only client hint value that was not read from
   Chromium source. The code branch that produces it is confirmed. The Windows
-  spelling is not.
+  spelling is not confirmed.
 
 ### WebRTC
 
 - The SDP has pion's shape. The CNAME is derived from the stream ID, where
   Chrome uses a random value. The codec set and payload types are pion defaults.
-  The header extension set is sparse. The attribute order is pion's. A server
-  that reads the offer can detect all of this.
+  The attribute order is pion's. A server that reads the offer can detect all of
+  this.
 - No STUN keepalive is sent to the STUN server. Chrome sends one every 10 s in
   addition to the peer keepalive. Over a 170 s capture this library sent two
   packets to its STUN servers, both during gathering, and nothing after.
@@ -244,8 +271,8 @@ The following gaps are scheduled. Gaps that will not be addressed are under
 - The ICE candidate priority is one number that packs the candidate type, a
   local preference and the component. pion always writes 65535 as the local
   preference, so a host candidate gets 2130706431 where the reference capture
-  shows 2122260223. A server that reads the offer sees it, and so does anyone
-  reading a STUN binding request. Chrome's local preference there was 32542.
+  shows 2122260223. A server that reads the offer sees it. Anyone reading a STUN
+  binding request sees it as well. Chrome's local preference there was 32542.
   Where that value comes from was not established, so there is no target to
   patch pion to yet.
 

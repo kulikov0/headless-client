@@ -34,19 +34,7 @@ else
   git -C "$SRC" checkout --quiet FETCH_HEAD
 fi
 
-apply_patch() {
-  patch_file="$1"
-  patch_name="$(basename "$patch_file")"
-  if patch -p1 -d "$DST" -N --dry-run -s < "$patch_file" >/dev/null 2>&1; then
-    patch -p1 -d "$DST" -N -s < "$patch_file"
-    echo "applied $patch_name"
-  elif patch -p1 -d "$DST" -R --dry-run -s < "$patch_file" >/dev/null 2>&1; then
-    echo "skipped $patch_name, already present in the source"
-  else
-    echo "cannot apply $patch_name" >&2
-    exit 1
-  fi
-}
+. "$UD/common.sh"
 
 rm -rf "$DST"
 mkdir -p "$(dirname "$DST")"
@@ -64,10 +52,10 @@ done
 
 cp "$UD"/_dtls-files/*.go "$DST/"
 
-apply_patch "$UD/dtls-default-version.patch"
-apply_patch "$UD/dtls-dualstack-server-prime.patch"
-apply_patch "$UD/dtls-handshake-fragment-mtu.patch"
-apply_patch "$UD/dtls-serverhello13-hook.patch"
+apply_patch "$DST" "$UD/dtls-default-version.patch"
+apply_patch "$DST" "$UD/dtls-dualstack-server-prime.patch"
+apply_patch "$DST" "$UD/dtls-handshake-fragment-mtu.patch"
+apply_patch "$DST" "$UD/dtls-serverhello13-hook.patch"
 
 if grep -rq "$OLD" "$DST" --include='*.go'; then
   echo "residual $OLD references remain" >&2
