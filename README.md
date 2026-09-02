@@ -52,6 +52,8 @@ The package is named `headless`.
   pool with Chrome's per-host limit and idle timeout.
 - Headers: user agent, client hints, Accept, Accept-Encoding, Sec-Fetch-*.
 - WebSocket: the Chrome upgrade handshake.
+- QUIC: the two ClientHellos Chrome produces, transport parameters in Chrome's
+  shuffled order with one GREASE, and Chrome's Initial datagram size.
 - WebRTC: DTLS ClientHello extension shuffling, optional DTLS 1.3 mimicry,
   ServerHello extension order on both DTLS versions, no HelloVerifyRequest,
   handshake fragments sized so the datagram fills the MTU, SRTP profile order,
@@ -109,6 +111,46 @@ dialer := headless.ChromeWindows.WebSocketDialer(headless.TLSOptions{})
 
 The dialer ignores the `HTTP_PROXY` and `HTTPS_PROXY` environment variables.
 Pass a proxy through `TLSOptions.DialContext`.
+
+### QUIC and WebTransport
+
+`DialQUIC` opens a QUIC connection with Chrome's handshake.
+
+```go
+conn, err := headless.ChromeWindows.DialQUIC(ctx, address, headless.QUICOptions{
+	Transport:  headless.QUICWebTransport,
+	ServerName: "example.com",
+})
+```
+
+`QUICOptions` has seven fields. `Transport` selects the ClientHello and is
+described below. `ServerName` sets the SNI value and defaults to the host part
+of `address`. `ALPN` sets the ALPN list and defaults to `h3`.
+`InsecureSkipVerify` disables certificate verification. `EnableDatagrams`
+enables RFC 9221 datagrams. `KeepAlivePeriod` and `MaxIdleTimeout` set the
+matching QUIC timers.
+
+`QUICConfig` returns the TLS config and the QUIC config without dialing. Use it
+when the caller builds its own transport.
+
+Chrome sends two different QUIC ClientHellos. `Transport` selects which one to
+send. A server sees a different fingerprint for each.
+
+`QUICWebTransport` matches the handshake Chrome sends when a page opens a
+WebTransport session. Chrome's WebTransport client creates its own crypto
+config and does not pass it to the code that configures the HTTP/3 session
+pool. The handshake therefore uses BoringSSL defaults: no ECH extension, no
+post-quantum group, and BoringSSL's default signature algorithm list.
+
+`QUICHTTP3` matches the handshake Chrome sends for an HTTP/3 request. It adds
+the values that the HTTP/3 session pool sets: ECH GREASE, the X25519MLKEM768
+group, and the google_connection_options transport parameter.
+
+The supported group list comes from the BoringSSL default for the Chrome
+version in `measuredChromeMajorVersion`. That default changed between the
+BoringSSL revisions pinned by Chromium 151 and 153. When you change
+`measuredChromeMajorVersion`, read `ssl/ssl_key_share.cc` at the pinned
+revision and update `boringSSLMLKEMDefaultChromeMajorVersion`.
 
 ### WebRTC
 
@@ -251,7 +293,10 @@ The following gaps are scheduled. Gaps that will not be addressed are under
 
 ### HTTP
 
-- HTTP/3 and QUIC are not implemented.
+- The QUIC Initial packet splits the ClientHello into a different number of
+  CRYPTO frames than Chrome. Chrome sends nine frames at non-sequential offsets
+  in one datagram. This library sends three. The rest of the QUIC handshake
+  matches. See [QUIC and WebTransport](#quic-and-webtransport).
 - Accept-Language is fixed to ru-RU. Chrome reads this value from a per-locale
   resource. It does not derive the value, so a table is required.
 - sec-ch-ua-platform is the only client hint value that was not read from
@@ -327,7 +372,7 @@ after the task runs, which adds the extra millisecond.
 
 ## Layout
 
-`internal/dtls`, `internal/ice`, `internal/chromehttp2`, `webrtc`, and
+`internal/dtls`, `internal/ice`, `internal/chromehttp2`, `quic`, `webrtc`, and
 `websocket` are vendored. They are copies of upstream packages with fingerprint
 patches applied. Do not edit them by hand. Run the scripts in `update-deps` to
 regenerate them. Guard tests fail if a regenerated tree loses a patch.

@@ -1,0 +1,72 @@
+--- a/internal/handshake/crypto_setup.go
++++ b/internal/handshake/crypto_setup.go
+@@ -76,9 +76,7 @@
+ }
+ 
+ func (w *uquicWrapper) StoreSession(session *tls.SessionState) error {
+-	// tls and utls are both aliased to github.com/refraction-networking/utls
+-	// so *tls.SessionState and *utls.SessionState are the same type
+-	return w.conn.StoreSession(session)
++	return nil
+ }
+ 
+ func (w *uquicWrapper) Close() error {
+@@ -218,15 +216,6 @@
+ 			EnableSessionEvents: true,
+ 		}, utls.HelloCustom)
+ 
+-		// Check if GREASESeed is empty (first connection)
+-		greaseSeedEmpty := true
+-		for _, v := range cachedClientHelloSpec.GREASESeed {
+-			if v != 0 {
+-				greaseSeedEmpty = false
+-				break
+-			}
+-		}
+-
+ 		// Apply cached spec directly - utls will handle key regeneration internally
+ 		if err := uconn.ApplyPreset(cachedClientHelloSpec); err != nil {
+ 			// Fallback to clientHelloID if ApplyPreset fails
+@@ -236,10 +225,6 @@
+ 					EnableSessionEvents: true,
+ 				}, *clientHelloID)
+ 			}
+-		} else if greaseSeedEmpty {
+-			// After first ApplyPreset, capture the generated GREASE seed
+-			// and store it in the cached spec for subsequent connections
+-			cachedClientHelloSpec.GREASESeed = uconn.GetGREASESeed()
+ 		}
+ 		cs.conn = &uquicWrapper{conn: uconn}
+ 	} else if clientHelloID != nil {
+--- a/http3/client.go
++++ b/http3/client.go
+@@ -546,7 +546,7 @@
+ 		}
+ 		break
+ 	}
+-	connState := c.conn.ConnectionState().TLS
++	connState := cryptoTLSConnectionState(c.conn.ConnectionState().TLS)
+ 	res.TLS = &connState
+ 	res.Request = req
+ 	return res, nil
+--- a/http3/server_conn.go
++++ b/http3/server_conn.go
+@@ -164,7 +164,7 @@
+ 		return
+ 	}
+ 
+-	connState := conn.ConnectionState().TLS
++	connState := cryptoTLSConnectionState(conn.ConnectionState().TLS)
+ 	req.TLS = &connState
+ 	req.RemoteAddr = conn.RemoteAddr().String()
+ 
+--- a/http3/trace.go
++++ b/http3/trace.go
+@@ -100,6 +100,6 @@
+ 
+ func traceTLSHandshakeDone(trace *httptrace.ClientTrace, state tls.ConnectionState, err error) {
+ 	if trace != nil && trace.TLSHandshakeDone != nil {
+-		trace.TLSHandshakeDone(state, err)
++		trace.TLSHandshakeDone(cryptoTLSConnectionState(state), err)
+ 	}
+ }

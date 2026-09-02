@@ -1,0 +1,516 @@
+package http3
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"maps"
+	mrand "math/rand"
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+
+	"github.com/kulikov0/headless-client/quic"
+	"github.com/kulikov0/headless-client/quic/http3/qlog"
+	"github.com/kulikov0/headless-client/quic/qlogwriter"
+	"github.com/kulikov0/headless-client/quic/quicvarint"
+)
+
+const maxQuarterStreamID = 1<<60 - 1
+
+// invalidStreamID is a stream ID that is invalid. The first valid stream ID in QUIC is 0.
+const invalidStreamID = quic.StreamID(-1)
+
+// rawConn is an HTTP/3 connection.
+// It provides HTTP/3 specific functionality by wrapping a quic.Conn,
+// in particular handling of unidirectional HTTP/3 streams, SETTINGS and datagrams.
+type rawConn struct {
+	conn *quic.Conn
+
+	logger *slog.Logger
+
+	enableDatagrams  bool
+	sendGreaseFrames bool
+
+	streamMx sync.Mutex
+	streams  map[quic.StreamID]*stateTrackingStream
+
+	rcvdControlStr      atomic.Bool
+	rcvdQPACKEncoderStr atomic.Bool
+	rcvdQPACKDecoderStr atomic.Bool
+	controlStrHandler   func(*quic.ReceiveStream, *frameParser) // is called *after* the SETTINGS frame was parsed
+
+	onStreamsEmpty func()
+
+	settings *Settings
+	// peerQPACKMaxTableCapacity is the peer's SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+	// or -1 if it did not send one. Written before the control stream handler
+	// is invoked and read from there.
+	peerQPACKMaxTableCapacity int64
+	receivedSettings          chan struct{}
+
+	qlogger qlogwriter.Recorder
+
+	// qpackEncoderInstructionHandler processes QPACK encoder instructions from the peer
+	// This is optional - if nil, encoder instructions are ignored (no dynamic table)
+	qpackEncoderInstructionHandler func([]byte) error
+
+	// controlStrSend is the client-side send-half of the control stream.
+	// Stored after openControlStream so we can lazily write PRIORITY_UPDATE
+	// frames keyed to actual request stream IDs (RFC 9218 §7.1). Real Chrome
+	// emits PRIORITY_UPDATE just before HEADERS for a request, with the
+	// priority field value derived from the request's Sec-Fetch-Dest /
+	// resource type (matches the per-request "priority:" header).
+	controlStrSend   io.Writer
+	controlStrSendMx sync.Mutex
+}
+
+func newRawConn(
+	quicConn *quic.Conn,
+	enableDatagrams bool,
+	sendGreaseFrames bool,
+	onStreamsEmpty func(),
+	controlStrHandler func(*quic.ReceiveStream, *frameParser),
+	qlogger qlogwriter.Recorder,
+	logger *slog.Logger,
+) *rawConn {
+	return &rawConn{
+		conn:              quicConn,
+		logger:            logger,
+		enableDatagrams:   enableDatagrams,
+		sendGreaseFrames:  sendGreaseFrames,
+		receivedSettings:  make(chan struct{}),
+		streams:           make(map[quic.StreamID]*stateTrackingStream),
+		qlogger:           qlogger,
+		onStreamsEmpty:    onStreamsEmpty,
+		controlStrHandler: controlStrHandler,
+	}
+}
+
+func (c *rawConn) OpenUniStream() (*quic.SendStream, error) {
+	return c.conn.OpenUniStream()
+}
+
+// openControlStream opens the control stream and sends the SETTINGS frame.
+// It returns the control stream (needed by the server for sending GOAWAY later).
+//
+// Note: PRIORITY_UPDATE is NOT written here. Chrome emits one lazily, just
+// before the HEADERS frame of each request, carrying that request's stream ID
+// and priority. See MaybeSendPriorityUpdate.
+func (c *rawConn) openControlStream(settings *settingsFrame) (*quic.SendStream, error) {
+	str, err := c.conn.OpenUniStream()
+	if err != nil {
+		return nil, err
+	}
+	b := make([]byte, 0, 64)
+	b = quicvarint.Append(b, streamTypeControlStream)
+	b = settings.Append(b)
+
+	// Add GREASE frame after SETTINGS if enabled (mimics Chrome behavior)
+	if c.sendGreaseFrames {
+		b = appendGreaseFrame(b)
+	}
+
+	if c.qlogger != nil {
+		sf := qlog.SettingsFrame{
+			MaxFieldSectionSize: settings.MaxFieldSectionSize,
+			Other:               maps.Clone(settings.Other),
+		}
+		if settings.Datagram {
+			sf.Datagram = pointer(true)
+		}
+		if settings.ExtendedConnect {
+			sf.ExtendedConnect = pointer(true)
+		}
+		c.qlogger.RecordEvent(qlog.FrameCreated{
+			StreamID: str.StreamID(),
+			Raw:      qlog.RawInfo{Length: len(b)},
+			Frame:    qlog.Frame{Frame: sf},
+		})
+	}
+	if _, err := str.Write(b); err != nil {
+		return nil, err
+	}
+	// Stash the send-side so MaybeSendPriorityUpdate can write to it once each
+	// request stream is opened. On the client that is the only writer after
+	// open, and it serialises on controlStrSendMx; the server writes GOAWAY
+	// through the returned handle instead and never sends PRIORITY_UPDATE.
+	c.controlStrSendMx.Lock()
+	c.controlStrSend = str
+	c.controlStrSendMx.Unlock()
+	return str, nil
+}
+
+// MaybeSendPriorityUpdate writes a PRIORITY_UPDATE frame on the control stream
+// naming the given request stream, mirroring Chromium's
+// QuicSpdyStream::MaybeSendPriorityUpdateFrame:
+//
+//   - one frame per request stream, not one per connection;
+//   - no stream-ID floor, so the very first request on a fresh connection
+//     (stream 0) carries one too;
+//   - nothing at all when the priority equals the RFC 9218 defaults, because
+//     quiche seeds last_sent_priority_ with those defaults and only writes on
+//     a change.
+//
+// priorityValue is the RFC 9218 field value, the same string the request's
+// "priority:" header carries: "u=0, i" for documents, "u=1" for scripts,
+// "u=2, i" for images and so on.
+//
+// Callers must guard with c.sendGreaseFrames. That flag reads as "this preset
+// behaves like Chrome" here; PRIORITY_UPDATE is a real RFC 9218 frame and has
+// nothing to do with GREASE beyond sharing the gate.
+//
+// Returns nil silently if the control stream isn't open yet (early shutdown
+// race). Losing one PRIORITY_UPDATE beats breaking the connection.
+func (c *rawConn) MaybeSendPriorityUpdate(streamID quic.StreamID, priorityValue string) error {
+	if isDefaultPriority(priorityValue) {
+		return nil
+	}
+	b := appendPriorityUpdateFrameDynamic(nil, uint64(streamID), priorityValue)
+
+	// The mutex is held across the Write, not just the pointer read. One frame
+	// per request means as many writers as there are in-flight requests, and
+	// quic.SendStream.Write is not safe for concurrent use: interleaved partial
+	// frames on the control stream are a connection error.
+	c.controlStrSendMx.Lock()
+	defer c.controlStrSendMx.Unlock()
+	if c.controlStrSend == nil {
+		return nil
+	}
+	_, err := c.controlStrSend.Write(b)
+	return err
+}
+
+// isDefaultPriority reports whether an RFC 9218 priority field value is exactly
+// the default, urgency 3 and not incremental. Anything it cannot parse counts
+// as non-default, so an odd value produces a frame rather than silently
+// dropping one.
+func isDefaultPriority(v string) bool {
+	urgency, incremental := 3, false
+	for _, part := range strings.Split(v, ",") {
+		p := strings.TrimSpace(part)
+		switch {
+		case p == "":
+		case p == "i", p == "i=?1":
+			incremental = true
+		case p == "i=?0":
+			incremental = false
+		case strings.HasPrefix(p, "u="):
+			n, err := strconv.Atoi(strings.TrimSpace(p[2:]))
+			if err != nil || n < 0 || n > 7 {
+				return false
+			}
+			urgency = n
+		default:
+			return false
+		}
+	}
+	return urgency == 3 && !incremental
+}
+
+// appendPriorityUpdateFrameDynamic is the per-request equivalent of
+// appendPriorityUpdateFrame: caller passes the actual stream ID and the
+// resolved priority field value instead of the function hardcoding both.
+func appendPriorityUpdateFrameDynamic(b []byte, streamID uint64, priorityValue string) []byte {
+	b = quicvarint.Append(b, priorityUpdateFrameType)
+	pv := []byte(priorityValue)
+	streamIDLen := quicvarint.Len(streamID)
+	b = quicvarint.Append(b, uint64(streamIDLen)+uint64(len(pv)))
+	b = quicvarint.Append(b, streamID)
+	b = append(b, pv...)
+	return b
+}
+
+func (c *rawConn) TrackStream(str *quic.Stream) *stateTrackingStream {
+	hstr := newStateTrackingStream(str, c, func(b []byte) error { return c.sendDatagram(str.StreamID(), b) })
+
+	c.streamMx.Lock()
+	c.streams[str.StreamID()] = hstr
+	c.streamMx.Unlock()
+	return hstr
+}
+
+func (c *rawConn) RemoteAddr() net.Addr {
+	return c.conn.RemoteAddr()
+}
+
+func (c *rawConn) ConnectionState() quic.ConnectionState {
+	return c.conn.ConnectionState()
+}
+
+func (c *rawConn) clearStream(id quic.StreamID) {
+	c.streamMx.Lock()
+	defer c.streamMx.Unlock()
+
+	delete(c.streams, id)
+	if len(c.streams) == 0 {
+		c.onStreamsEmpty()
+	}
+}
+
+func (c *rawConn) hasActiveStreams() bool {
+	c.streamMx.Lock()
+	defer c.streamMx.Unlock()
+
+	return len(c.streams) > 0
+}
+
+func (c *rawConn) CloseWithError(code quic.ApplicationErrorCode, msg string) error {
+	return c.conn.CloseWithError(code, msg)
+}
+
+func (c *rawConn) handleUnidirectionalStream(str *quic.ReceiveStream, isServer bool) {
+	streamType, err := quicvarint.Read(quicvarint.NewReader(str))
+	if err != nil {
+		if c.logger != nil {
+			c.logger.Debug("reading stream type on stream failed", "stream ID", str.StreamID(), "error", err)
+		}
+		return
+	}
+	// We're only interested in the control stream here.
+	switch streamType {
+	case streamTypeControlStream:
+	case streamTypeQPACKEncoderStream:
+		if isFirst := c.rcvdQPACKEncoderStr.CompareAndSwap(false, true); !isFirst {
+			c.CloseWithError(quic.ApplicationErrorCode(ErrCodeStreamCreationError), "duplicate QPACK encoder stream")
+			return
+		}
+		// Process encoder instructions if handler is set
+		if c.qpackEncoderInstructionHandler != nil {
+			go c.handleQPACKEncoderStream(str)
+		}
+		return
+	case streamTypeQPACKDecoderStream:
+		if isFirst := c.rcvdQPACKDecoderStr.CompareAndSwap(false, true); !isFirst {
+			c.CloseWithError(quic.ApplicationErrorCode(ErrCodeStreamCreationError), "duplicate QPACK decoder stream")
+		}
+		// Our QPACK implementation doesn't use the dynamic table yet.
+		return
+	case streamTypePushStream:
+		if isServer {
+			// only the server can push
+			c.CloseWithError(quic.ApplicationErrorCode(ErrCodeStreamCreationError), "")
+		} else {
+			// we never increased the Push ID, so we don't expect any push streams
+			c.CloseWithError(quic.ApplicationErrorCode(ErrCodeIDError), "")
+		}
+		return
+	default:
+		str.CancelRead(quic.StreamErrorCode(ErrCodeStreamCreationError))
+		return
+	}
+	// Only a single control stream is allowed.
+	if isFirstControlStr := c.rcvdControlStr.CompareAndSwap(false, true); !isFirstControlStr {
+		c.conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeStreamCreationError), "duplicate control stream")
+		return
+	}
+	c.handleControlStream(str)
+}
+
+func (c *rawConn) handleControlStream(str *quic.ReceiveStream) {
+	fp := &frameParser{closeConn: c.conn.CloseWithError, r: str, streamID: str.StreamID()}
+	f, err := fp.ParseNext(c.qlogger)
+	if err != nil {
+		var serr *quic.StreamError
+		if err == io.EOF || errors.As(err, &serr) {
+			c.conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeClosedCriticalStream), "")
+			return
+		}
+		c.conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeFrameError), "")
+		return
+	}
+	sf, ok := f.(*settingsFrame)
+	if !ok {
+		c.conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeMissingSettings), "")
+		return
+	}
+	c.settings = &Settings{
+		EnableDatagrams:       sf.Datagram,
+		EnableExtendedConnect: sf.ExtendedConnect,
+		Other:                 sf.Other,
+	}
+	// Kept separately because Settings does not carry it and the QPACK encoder
+	// needs to answer it. -1 means the peer did not send it.
+	c.peerQPACKMaxTableCapacity = sf.QPACKMaxTableCapacity
+	close(c.receivedSettings)
+	if sf.Datagram {
+		// If datagram support was enabled on our side as well as on the server side,
+		// we can expect it to have been negotiated both on the transport and on the HTTP/3 layer.
+		// Note: ConnectionState() will block until the handshake is complete (relevant when using 0-RTT).
+		if c.enableDatagrams && !c.ConnectionState().SupportsDatagrams {
+			c.CloseWithError(quic.ApplicationErrorCode(ErrCodeSettingsError), "missing QUIC Datagram support")
+			return
+		}
+		go func() {
+			if err := c.receiveDatagrams(); err != nil {
+				if c.logger != nil {
+					c.logger.Debug("receiving datagrams failed", "error", err)
+				}
+			}
+		}()
+	}
+
+	if c.controlStrHandler != nil {
+		c.controlStrHandler(str, fp)
+	}
+}
+
+func (c *rawConn) sendDatagram(streamID quic.StreamID, b []byte) error {
+	// TODO: this creates a lot of garbage and an additional copy
+	data := make([]byte, 0, len(b)+8)
+	quarterStreamID := uint64(streamID / 4)
+	data = quicvarint.Append(data, uint64(streamID/4))
+	data = append(data, b...)
+	if c.qlogger != nil {
+		c.qlogger.RecordEvent(qlog.DatagramCreated{
+			QuaterStreamID: quarterStreamID,
+			Raw: qlog.RawInfo{
+				Length:        len(data),
+				PayloadLength: len(b),
+			},
+		})
+	}
+	return c.conn.SendDatagram(data)
+}
+
+func (c *rawConn) receiveDatagrams() error {
+	for {
+		b, err := c.conn.ReceiveDatagram(context.Background())
+		if err != nil {
+			return err
+		}
+		quarterStreamID, n, err := quicvarint.Parse(b)
+		if err != nil {
+			c.CloseWithError(quic.ApplicationErrorCode(ErrCodeDatagramError), "")
+			return fmt.Errorf("could not read quarter stream id: %w", err)
+		}
+		if c.qlogger != nil {
+			c.qlogger.RecordEvent(qlog.DatagramParsed{
+				QuaterStreamID: quarterStreamID,
+				Raw: qlog.RawInfo{
+					Length:        len(b),
+					PayloadLength: len(b) - n,
+				},
+			})
+		}
+		if quarterStreamID > maxQuarterStreamID {
+			c.CloseWithError(quic.ApplicationErrorCode(ErrCodeDatagramError), "")
+			return fmt.Errorf("invalid quarter stream id: %w", err)
+		}
+		streamID := quic.StreamID(4 * quarterStreamID)
+		c.streamMx.Lock()
+		dg, ok := c.streams[streamID]
+		c.streamMx.Unlock()
+		if !ok {
+			continue
+		}
+		dg.enqueueDatagram(b[n:])
+	}
+}
+
+// ReceivedSettings returns a channel that is closed once the peer's SETTINGS frame was received.
+// Settings can be optained from the Settings method after the channel was closed.
+func (c *rawConn) ReceivedSettings() <-chan struct{} { return c.receivedSettings }
+
+// Settings returns the settings received on this connection.
+// It is only valid to call this function after the channel returned by ReceivedSettings was closed.
+func (c *rawConn) Settings() *Settings { return c.settings }
+
+// Context returns the context of the underlying QUIC connection.
+func (c *rawConn) Context() context.Context { return c.conn.Context() }
+
+// handleQPACKEncoderStream reads and processes QPACK encoder instructions from the peer.
+// This populates the dynamic table so we can decode headers that reference it.
+func (c *rawConn) handleQPACKEncoderStream(str *quic.ReceiveStream) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := str.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				return
+			}
+			if c.logger != nil {
+				c.logger.Debug("reading QPACK encoder stream failed", "error", err)
+			}
+			return
+		}
+		if n > 0 {
+			if err := c.qpackEncoderInstructionHandler(buf[:n]); err != nil {
+				if c.logger != nil {
+					c.logger.Debug("processing QPACK encoder instructions failed", "error", err)
+				}
+				c.CloseWithError(quic.ApplicationErrorCode(ErrCodeQPACKDecompressionFailed), "")
+				return
+			}
+		}
+	}
+}
+
+// greaseFrame returns the type and payload of one GREASE frame, drawn the way
+// quiche draws them.
+//
+// quiche, HttpEncoder::SerializeGreasingFrame:
+//
+//	uint32_t result;
+//	QuicRandom::GetInstance()->RandBytes(&result, sizeof(result));
+//	frame_type = 0x1fULL * static_cast<uint64_t>(result) + 0x21ULL;
+//
+//	// The payload length is random but within [0, 3].
+//	payload_length = result % 4;
+//
+// Two properties matter and neither survived the previous implementation.
+//
+// The draw is a full uint32, so the frame type spans [0x21, 0x1f*2^32+0x21),
+// which reaches past 1.3e11. Drawing n from [1e6, 1e8) capped the type at
+// about 3.1e9, and a real client lands in that band on roughly 2 percent of
+// connections. A captured Chrome 152 frame type was 119790168723, forty times
+// our old ceiling.
+//
+// The payload length is DERIVED FROM THE SAME DRAW, so a server can invert the
+// frame type and check the length it implies. Sending an empty payload
+// unconditionally contradicts the frame's own type three times in four. Both
+// GREASE frames captured from this client before the fix inverted to a length
+// of 3 and 2 and carried no payload at all.
+func greaseFrame() (frameType uint64, payload []byte) {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// The value only has to be unpredictable, not secret, and a client
+		// that cannot draw here would otherwise emit a fixed frame.
+		binary.LittleEndian.PutUint32(b[:], mrand.Uint32())
+	}
+	result := binary.LittleEndian.Uint32(b[:])
+	frameType = 0x1f*uint64(result) + 0x21
+	if n := result % 4; n > 0 {
+		payload = make([]byte, n)
+		if _, err := rand.Read(payload); err != nil {
+			for i := range payload {
+				payload[i] = byte(mrand.Uint32())
+			}
+		}
+	}
+	return frameType, payload
+}
+
+// appendGreaseFrame appends a GREASE frame to the byte slice.
+// GREASE frames help prevent implementation bugs from ossifying protocol extensions.
+func appendGreaseFrame(b []byte) []byte {
+	frameType, payload := greaseFrame()
+	b = quicvarint.Append(b, frameType)
+	b = quicvarint.Append(b, uint64(len(payload)))
+	return append(b, payload...)
+}
+
+// PRIORITY_UPDATE frame type for request streams (RFC 9218)
+const priorityUpdateFrameType = 0xf0700
+
+// PRIORITY_UPDATE on the control stream is emitted lazily, per request. See
+// rawConn.MaybeSendPriorityUpdate and appendPriorityUpdateFrameDynamic. The
+// older appendPriorityUpdateFrame helper hardcoded stream_id=4 and "u=0, i",
+// which only matched Chrome for document navigations and lost the
+// per-resource-type variation the priority table expresses.

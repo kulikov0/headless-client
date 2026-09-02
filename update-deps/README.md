@@ -4,7 +4,7 @@ Scripts that regenerate the vendored packages in this module. A vendored
 package is a copy of a third-party module with its import paths rewritten to a
 path inside this module.
 
-Do not edit internal/dtls, internal/ice, internal/chromehttp2, webrtc, or
+Do not edit internal/dtls, internal/ice, internal/chromehttp2, quic, webrtc, or
 websocket by hand. Run the scripts.
 
 internal/chromehttp1 is not vendored. Edit it directly. See
@@ -21,6 +21,9 @@ internal/chromehttp1 is not vendored. Edit it directly. See
   packages of golang.org/x/net, with the HTTP/2 fingerprint patch.
 - websocket: github.com/gorilla/websocket with the Chrome handshake patch. It is
   at the top level because consumers import it.
+- quic: github.com/sardanioss/quic-go and github.com/sardanioss/qpack, pointed at
+  refraction-networking/utls and net/http. It is at the top level because
+  consumers import quic, http3 and quicvarint directly.
 
 ## dtls.sh
 
@@ -111,6 +114,39 @@ Steps:
 6. Copy the tests from _chromehttp2-tests.
 7. Build and test internal/chromehttp2.
 
+## chromequic.sh
+
+    ./update-deps/chromequic.sh [version] [qpack-version]
+
+Default versions: v1.2.28 and v0.6.3.
+
+Steps:
+
+1. Download github.com/sardanioss/quic-go and copy it to quic. Copy
+   github.com/sardanioss/qpack to quic/qpack. Non-test files only.
+2. Remove .git at any depth, .github, go.mod, go.sum, assets, example, interop,
+   fuzzing, integrationtests, testutils, metrics, tools, internal/mocks,
+   mockgen.go, README.md, SECURITY.md, codecov.yml and oss-fuzz.sh.
+3. Rewrite github.com/sardanioss/quic-go to the quic path,
+   github.com/sardanioss/qpack to quic/qpack, github.com/sardanioss/utls to
+   github.com/refraction-networking/utls, and github.com/sardanioss/http to
+   net/http. The two header-order keys of that http fork become local constants.
+4. Copy the files from _chromequic-files.
+5. Apply chromequic-refraction-utls.patch and
+   chromequic-preset-transport-params.patch.
+6. Build quic.
+
+The qpack fork is copied rather than replaced with github.com/quic-go/qpack
+because it adds a Sensitive field to HeaderField and the never-index encoding
+that goes with it. Upstream qpack has neither, so http3 does not compile
+against it.
+
+The upstream is a fork of quic-go that matches Chrome's QUIC fingerprint. Its
+own uTLS is a fork of refraction-networking/utls. Every uTLS symbol the QUIC
+code needs exists in refraction v1.8.2 except three additions,
+UQUICConn.StoreSession, ClientHelloSpec.GREASESeed and UQUICConn.GetGREASESeed,
+which chromequic-refraction-utls.patch removes.
+
 ## websocket.sh
 
     ./update-deps/websocket.sh [version]
@@ -143,6 +179,39 @@ request_test.go.
 websocket-chrome-handshake.patch calls chromehttp1.WriteRequest. If you change
 that signature, the patched websocket tree does not compile. websocket.sh builds
 websocket as its last step, so the failure appears when you run the script.
+
+## chromequic-refraction-utls.patch
+
+Changes quic/internal/handshake/crypto_setup.go and three files under
+quic/http3. Applied by chromequic.sh.
+
+The upstream fork uses three uTLS additions that refraction-networking/utls
+v1.8.2 does not have. StoreSession becomes a no-op, so a QUIC session ticket is
+not stored and a later connection runs a full handshake. The GREASE seed is no
+longer carried across connections, so every connection draws its own GREASE
+values, which is what a browser does anyway when the session is new.
+
+The http3 files convert a utls.ConnectionState to a crypto/tls.ConnectionState
+before handing it to net/http and net/http/httptrace, which are typed against
+crypto/tls. The converter is tls_state.go from _chromequic-files.
+
+## chromequic-preset-transport-params.patch
+
+Changes uquicWrapper in quic/internal/handshake/crypto_setup.go. Applied by
+chromequic.sh.
+
+refraction-networking/utls marshals its QUICTransportParametersExtension from a
+structured TransportParameters value and its SetTransportParameters explicitly
+does not write into a preset, so a ClientHelloSpec built by hand emits
+quic_transport_parameters with length zero. The patch gives the wrapper a
+reference to the spec and fills the raw bytes into the utls.GenericExtension
+that carries extension 57. ApplyPreset copies extension pointers and does not
+marshal the ClientHello, so the value set here reaches the wire.
+
+Without the patch the handshake still completes against some servers, but JA4
+reports the connection as t rather than q, because the transport parameters
+extension is empty. That difference only shows on the wire, so the check is a
+stand capture rather than a unit test.
 
 ## websocket-chrome-handshake.patch
 
@@ -231,6 +300,17 @@ first builds an offer through the public API and compares the extmap lines of
 both media sections against a browser capture. Removing the sort call changes
 the order of the video section. Reversing the direction of the picker scan gives
 toffset the identifier 5 instead of 14.
+
+## _chromequic-files
+
+header_order_keys.go and tls_state.go, copied into quic/http3 by chromequic.sh.
+
+header_order_keys.go declares the two header-order keys that the
+github.com/sardanioss/http fork exports and net/http does not.
+
+tls_state.go converts between the two ConnectionState types.
+
+The underscore prefix stops the go tool from building the directory.
 
 ## _dtls-files
 

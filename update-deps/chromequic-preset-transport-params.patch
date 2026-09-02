@@ -1,0 +1,40 @@
+--- a/internal/handshake/crypto_setup.go
++++ b/internal/handshake/crypto_setup.go
+@@ -39,10 +39,13 @@
+ 	ConnectionState() tls.ConnectionState
+ }
+ 
++const quicTransportParametersExtensionID = 57
++
+ // uquicWrapper wraps utls.UQUICConn to implement the quicConn interface
+ // by converting between utls and standard tls types
+ type uquicWrapper struct {
+ 	conn *utls.UQUICConn
++	spec *utls.ClientHelloSpec
+ }
+ 
+ func (w *uquicWrapper) Start(ctx context.Context) error {
+@@ -65,6 +68,14 @@
+ }
+ 
+ func (w *uquicWrapper) SetTransportParameters(params []byte) {
++	if w.spec != nil {
++		for _, extension := range w.spec.Extensions {
++			generic, ok := extension.(*utls.GenericExtension)
++			if ok && generic.Id == quicTransportParametersExtensionID {
++				generic.Data = params
++			}
++		}
++	}
+ 	w.conn.SetTransportParameters(params)
+ }
+ 
+@@ -226,7 +237,7 @@
+ 				}, *clientHelloID)
+ 			}
+ 		}
+-		cs.conn = &uquicWrapper{conn: uconn}
++		cs.conn = &uquicWrapper{conn: uconn, spec: cachedClientHelloSpec}
+ 	} else if clientHelloID != nil {
+ 		// Use uTLS UQUICClient for TLS fingerprinting (no cached spec)
+ 		utlsConf := tlsConfigToUtls(tlsConf, echConfigList)
