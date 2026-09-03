@@ -44,7 +44,9 @@ rm -rf "$DST/.git" "$DST/.github" "$DST/go.mod" "$DST/go.sum"
 find "$DST" -type d -name '.git' -exec rm -rf {} + 2>/dev/null || true
 find "$DST" -name '*_test.go' -delete
 find "$DST" -type d \( -name testdata -o -name examples -o -name e2e \) -exec rm -rf {} + 2>/dev/null || true
-rm -f "$DST/README.md" "$DST/codecov.yml" "$DST/renovate.json"
+rm -f "$DST/codecov.yml" "$DST/renovate.json" "$DST/.gitignore" "$DST/.golangci.yml" \
+  "$DST/.goreleaser.yml" "$DST/.editorconfig"
+find "$DST" -name 'README.md' -delete
 
 grep -rl "$OLD" "$DST" --include='*.go' | while read -r f; do
   perl -pi -e "s#\\Q$OLD\\E#$NEW#g" "$f"
