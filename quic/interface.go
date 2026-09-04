@@ -226,14 +226,6 @@ type Config struct {
 	// Set to true when fingerprint matching is more important than SNI obscuring.
 	DisableClientHelloScrambling bool
 
-	// ChromeStyleInitialPackets enables Chrome-like frame patterns in Initial packets.
-	// When enabled, the packer will:
-	// - Use smaller CRYPTO frames (max ~150 bytes each)
-	// - Add PING frames interspersed with CRYPTO frames
-	// - Distribute padding across Initial packets
-	// This produces fingerprints closer to Chrome's Initial packet pattern.
-	ChromeStyleInitialPackets bool
-
 	// TransportParameterOrder controls the order in which QUIC transport parameters are sent.
 	// Different browsers send parameters in different orders, which can be fingerprinted.
 	// Options:

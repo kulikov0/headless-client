@@ -110,8 +110,8 @@ func TestQUICConfigCarriesTheChromeTransportParameters(t *testing.T) {
 	if webTransport.TransportParameterOrder != 1 {
 		t.Fatalf("transport parameter order %d, chrome shuffles and the fork calls that mode 1", webTransport.TransportParameterOrder)
 	}
-	if webTransport.InitialPacketSize != 1258 {
-		t.Fatalf("initial packet size %d, the chrome capture pads its initial datagram to 1258", webTransport.InitialPacketSize)
+	if webTransport.InitialPacketSize != 1250 {
+		t.Fatalf("initial packet size %d, chrome pads its initial udp payload to 1250", webTransport.InitialPacketSize)
 	}
 	if webTransport.MaxIncomingUniStreams != 103 {
 		t.Fatalf("initial_max_streams_uni %d, chrome sends 103", webTransport.MaxIncomingUniStreams)

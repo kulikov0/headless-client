@@ -131,7 +131,6 @@ func populateConfig(config *Config) *Config {
 		CachedClientHelloSpec:            config.CachedClientHelloSpec,
 		ECHConfigList:                    config.ECHConfigList,
 		DisableClientHelloScrambling:     config.DisableClientHelloScrambling,
-		ChromeStyleInitialPackets:        config.ChromeStyleInitialPackets,
 		TransportParameterOrder:          config.TransportParameterOrder,
 		CustomTransportParameterOrder:    config.CustomTransportParameterOrder,
 		TransportParameterShuffleSeed:    config.TransportParameterShuffleSeed,

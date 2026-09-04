@@ -21,7 +21,7 @@ const (
 
 const (
 	boringSSLMLKEMDefaultChromeMajorVersion = 153
-	quicInitialPacketSize                   = 1258
+	quicInitialPacketSize                   = 1250
 	quicConnectionIDLength                  = 0
 	quicInitialMaxData                      = 15728640
 	quicInitialMaxStreamData                = 6291456
@@ -168,6 +168,7 @@ func (p Profile) QUICConfig(options QUICOptions) (*utls.Config, *quic.Config) {
 		InitialConnectionReceiveWindow: quicInitialMaxData,
 		MaxDatagramFrameSize:           quicMaxDatagramFrameSize,
 		AdditionalTransportParameters:  chromeQUICTransportParameters(options.Transport),
+		DisableClientHelloScrambling:   true,
 	}
 
 	return tlsConfig, quicConfig
