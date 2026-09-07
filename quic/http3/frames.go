@@ -2,10 +2,12 @@ package http3
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"slices"
 
 	"github.com/kulikov0/headless-client/quic"
 	"github.com/kulikov0/headless-client/quic/http3/qlog"
@@ -285,55 +287,37 @@ func parseSettingsFrame(r *countingByteReader, l uint64, streamID quic.StreamID,
 
 func (f *settingsFrame) Append(b []byte) []byte {
 	b = quicvarint.Append(b, 0x4)
-	var l int
-	// Chrome order: 1 (QPACK_MAX_TABLE_CAPACITY), 6 (MAX_FIELD_SECTION_SIZE),
-	// 7 (QPACK_BLOCKED_STREAMS), 51 (DATAGRAM), GREASE
+	entries := make([][2]uint64, 0, len(f.Other)+5)
 	if f.QPACKMaxTableCapacity >= 0 {
-		l += quicvarint.Len(settingQPACKMaxTableCapacity) + quicvarint.Len(uint64(f.QPACKMaxTableCapacity))
+		entries = append(entries, [2]uint64{settingQPACKMaxTableCapacity, uint64(f.QPACKMaxTableCapacity)})
 	}
 	if f.MaxFieldSectionSize >= 0 {
-		l += quicvarint.Len(settingMaxFieldSectionSize) + quicvarint.Len(uint64(f.MaxFieldSectionSize))
+		entries = append(entries, [2]uint64{settingMaxFieldSectionSize, uint64(f.MaxFieldSectionSize)})
 	}
 	if f.QPACKBlockedStreams >= 0 {
-		l += quicvarint.Len(settingQPACKBlockedStreams) + quicvarint.Len(uint64(f.QPACKBlockedStreams))
+		entries = append(entries, [2]uint64{settingQPACKBlockedStreams, uint64(f.QPACKBlockedStreams)})
 	}
 	if f.Datagram {
-		l += quicvarint.Len(settingDatagram) + quicvarint.Len(1)
+		entries = append(entries, [2]uint64{settingDatagram, 1})
 	}
 	if f.ExtendedConnect {
-		l += quicvarint.Len(settingExtendedConnect) + quicvarint.Len(1)
+		entries = append(entries, [2]uint64{settingExtendedConnect, 1})
 	}
-	// Other settings (includes GREASE) at the end
 	for id, val := range f.Other {
-		l += quicvarint.Len(id) + quicvarint.Len(val)
+		entries = append(entries, [2]uint64{id, val})
+	}
+	slices.SortFunc(entries, func(a, b [2]uint64) int { return cmp.Compare(a[0], b[0]) })
+
+	var l int
+	for _, entry := range entries {
+		l += quicvarint.Len(entry[0]) + quicvarint.Len(entry[1])
 	}
 	b = quicvarint.Append(b, uint64(l))
-	// Write settings in Chrome order
-	if f.QPACKMaxTableCapacity >= 0 {
-		b = quicvarint.Append(b, settingQPACKMaxTableCapacity)
-		b = quicvarint.Append(b, uint64(f.QPACKMaxTableCapacity))
+	for _, entry := range entries {
+		b = quicvarint.Append(b, entry[0])
+		b = quicvarint.Append(b, entry[1])
 	}
-	if f.MaxFieldSectionSize >= 0 {
-		b = quicvarint.Append(b, settingMaxFieldSectionSize)
-		b = quicvarint.Append(b, uint64(f.MaxFieldSectionSize))
-	}
-	if f.QPACKBlockedStreams >= 0 {
-		b = quicvarint.Append(b, settingQPACKBlockedStreams)
-		b = quicvarint.Append(b, uint64(f.QPACKBlockedStreams))
-	}
-	if f.Datagram {
-		b = quicvarint.Append(b, settingDatagram)
-		b = quicvarint.Append(b, 1)
-	}
-	if f.ExtendedConnect {
-		b = quicvarint.Append(b, settingExtendedConnect)
-		b = quicvarint.Append(b, 1)
-	}
-	// Other settings (includes GREASE) at the end
-	for id, val := range f.Other {
-		b = quicvarint.Append(b, id)
-		b = quicvarint.Append(b, val)
-	}
+
 	return b
 }
 

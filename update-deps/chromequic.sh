@@ -69,9 +69,11 @@ gofmt -w "$DST"
 cp "$UD/_chromequic-files/tls_state.go" "$DST/http3/tls_state.go"
 cp "$UD/_chromequic-files/chaos_protector.go" "$DST/chaos_protector.go"
 cp "$UD/_chromequic-files/chaos_protector_test.go" "$DST/chaos_protector_test.go"
+cp "$UD/_chromequic-files/http3_settings_test.go" "$DST/http3/http3_settings_test.go"
 apply_patch "$DST" "$UD/chromequic-refraction-utls.patch"
 apply_patch "$DST" "$UD/chromequic-preset-transport-params.patch"
 apply_patch "$DST" "$UD/chromequic-chaos-protection.patch"
+apply_patch "$DST" "$UD/chromequic-http3-settings.patch"
 
 go -C "$REPO" build ./quic/...
 echo "quic regenerated from github.com/sardanioss/quic-go@$VERSION"

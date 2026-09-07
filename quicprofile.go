@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"io"
 	"net"
 	"time"
 
@@ -137,6 +138,7 @@ type QUICOptions struct {
 	EnableDatagrams    bool
 	KeepAlivePeriod    time.Duration
 	MaxIdleTimeout     time.Duration
+	KeyLogWriter       io.Writer
 }
 
 func (o QUICOptions) alpn() []string {
@@ -153,6 +155,7 @@ func (p Profile) QUICConfig(options QUICOptions) (*utls.Config, *quic.Config) {
 		ServerName:         options.ServerName,
 		InsecureSkipVerify: options.InsecureSkipVerify,
 		NextProtos:         alpn,
+		KeyLogWriter:       options.KeyLogWriter,
 	}
 	quicConfig := &quic.Config{
 		EnableDatagrams:                options.EnableDatagrams,

@@ -108,14 +108,7 @@ func (c *rawConn) openControlStream(settings *settingsFrame) (*quic.SendStream, 
 	if err != nil {
 		return nil, err
 	}
-	b := make([]byte, 0, 64)
-	b = quicvarint.Append(b, streamTypeControlStream)
-	b = settings.Append(b)
-
-	// Add GREASE frame after SETTINGS if enabled (mimics Chrome behavior)
-	if c.sendGreaseFrames {
-		b = appendGreaseFrame(b)
-	}
+	b := appendControlStream(make([]byte, 0, 64), settings, c.sendGreaseFrames)
 
 	if c.qlogger != nil {
 		sf := qlog.SettingsFrame{
@@ -495,6 +488,34 @@ func greaseFrame() (frameType uint64, payload []byte) {
 		}
 	}
 	return frameType, payload
+}
+
+func appendControlStream(b []byte, settings *settingsFrame, sendGreaseFrames bool) []byte {
+	if sendGreaseFrames {
+		greased := *settings
+		greased.Other = make(map[uint64]uint64, len(settings.Other)+1)
+		maps.Copy(greased.Other, settings.Other)
+		greasedID, greasedValue := greaseSetting()
+		greased.Other[greasedID] = greasedValue
+		settings = &greased
+	}
+	b = quicvarint.Append(b, streamTypeControlStream)
+	b = settings.Append(b)
+	if sendGreaseFrames {
+		b = appendGreaseFrame(b)
+	}
+
+	return b
+}
+
+func greaseSetting() (id, value uint64) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		binary.LittleEndian.PutUint32(b[0:4], mrand.Uint32())
+		binary.LittleEndian.PutUint32(b[4:8], mrand.Uint32())
+	}
+
+	return 0x1f*uint64(binary.LittleEndian.Uint32(b[0:4])) + 0x21, uint64(binary.LittleEndian.Uint32(b[4:8]))
 }
 
 // appendGreaseFrame appends a GREASE frame to the byte slice.

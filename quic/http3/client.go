@@ -77,9 +77,11 @@ type ClientConn struct {
 	// life and are written from two goroutines: the control stream handler
 	// answers the peer's advertised table capacity, and the encoder
 	// instruction handler acknowledges what the peer inserts.
-	qpackMx         sync.Mutex
-	qpackEncoderStr *quic.SendStream
-	qpackDecoderStr *quic.SendStream
+	qpackMx                 sync.Mutex
+	qpackEncoderStr         *quic.SendStream
+	qpackDecoderStr         *quic.SendStream
+	qpackEncoderStrTypeSent bool
+	qpackDecoderStrTypeSent bool
 
 	qlogger qlogwriter.Recorder
 	logger  *slog.Logger
@@ -164,10 +166,8 @@ func newClientConn(
 		return c
 	}
 
-	// Open QPACK encoder stream (Chrome opens this even without dynamic table)
 	c.openQPACKEncoderStream()
 
-	// Open QPACK decoder stream (Chrome opens this even without dynamic table)
 	c.openQPACKDecoderStream()
 
 	// Small delay to ensure control/QPACK streams are transmitted before request stream.
@@ -379,7 +379,7 @@ func (c *ClientConn) roundTrip(req *http.Request) (*http.Response, error) {
 	// a first-request-only thing; MaybeSendPriorityUpdate applies that rule.
 	// Gated on sendGreaseFrames so presets that don't behave like Chrome stay
 	// byte-clean.
-	if c.rawConn.sendGreaseFrames {
+	if c.rawConn.sendGreaseFrames && !isExtendedConnectRequest(req) {
 		priorityValue := req.Header.Get("Priority")
 		if priorityValue == "" {
 			// Chrome emits the frame whether or not it also sent the header, so
@@ -572,8 +572,6 @@ func appendQPACKPrefixedInt(b []byte, prefixBits uint8, pattern byte, v uint64) 
 	return append(b, byte(v))
 }
 
-// openQPACKEncoderStream opens the QPACK encoder stream.
-// Chrome opens this stream even without using dynamic tables.
 func (c *ClientConn) openQPACKEncoderStream() {
 	str, err := c.rawConn.OpenUniStream()
 	if err != nil {
@@ -582,18 +580,24 @@ func (c *ClientConn) openQPACKEncoderStream() {
 		}
 		return
 	}
-	// Write stream type (QPACK encoder = 2)
-	b := make([]byte, 0, 8)
-	b = quicvarint.Append(b, streamTypeQPACKEncoderStream)
-	if _, err := str.Write(b); err != nil {
-		if c.logger != nil {
-			c.logger.Debug("failed to write QPACK encoder stream type", "error", err)
-		}
-		return
-	}
 	c.qpackMx.Lock()
 	c.qpackEncoderStr = str
 	c.qpackMx.Unlock()
+}
+
+func (c *ClientConn) writeQPACKEncoderInstruction(data []byte) error {
+	c.qpackMx.Lock()
+	defer c.qpackMx.Unlock()
+	if c.qpackEncoderStr == nil {
+		return nil
+	}
+	if !c.qpackEncoderStrTypeSent {
+		data = append(quicvarint.Append(nil, streamTypeQPACKEncoderStream), data...)
+		c.qpackEncoderStrTypeSent = true
+	}
+	_, err := c.qpackEncoderStr.Write(data)
+
+	return err
 }
 
 // sendQPACKTableCapacity answers the peer's advertised
@@ -613,20 +617,12 @@ func (c *ClientConn) sendQPACKTableCapacity(capacity uint64) {
 	if capacity > maxQPACKEncoderTableCapacity {
 		capacity = maxQPACKEncoderTableCapacity
 	}
-	c.qpackMx.Lock()
-	str := c.qpackEncoderStr
-	c.qpackMx.Unlock()
-	if str == nil {
-		return
-	}
 	// Set Dynamic Table Capacity: 001xxxxx, 5-bit prefix. RFC 9204 4.3.1.
-	if _, err := str.Write(appendQPACKPrefixedInt(nil, 5, 0x20, capacity)); err != nil && c.logger != nil {
+	if err := c.writeQPACKEncoderInstruction(appendQPACKPrefixedInt(nil, 5, 0x20, capacity)); err != nil && c.logger != nil {
 		c.logger.Debug("failed to write QPACK Set Dynamic Table Capacity", "error", err)
 	}
 }
 
-// openQPACKDecoderStream opens the QPACK decoder stream.
-// Chrome opens this stream even without using dynamic tables.
 func (c *ClientConn) openQPACKDecoderStream() {
 	str, err := c.rawConn.OpenUniStream()
 	if err != nil {
@@ -635,18 +631,24 @@ func (c *ClientConn) openQPACKDecoderStream() {
 		}
 		return
 	}
-	// Write stream type (QPACK decoder = 3)
-	b := make([]byte, 0, 8)
-	b = quicvarint.Append(b, streamTypeQPACKDecoderStream)
-	if _, err := str.Write(b); err != nil {
-		if c.logger != nil {
-			c.logger.Debug("failed to write QPACK decoder stream type", "error", err)
-		}
-		return
-	}
 	c.qpackMx.Lock()
 	c.qpackDecoderStr = str
 	c.qpackMx.Unlock()
+}
+
+func (c *ClientConn) writeQPACKDecoderInstruction(data []byte) error {
+	c.qpackMx.Lock()
+	defer c.qpackMx.Unlock()
+	if c.qpackDecoderStr == nil {
+		return nil
+	}
+	if !c.qpackDecoderStrTypeSent {
+		data = append(quicvarint.Append(nil, streamTypeQPACKDecoderStream), data...)
+		c.qpackDecoderStrTypeSent = true
+	}
+	_, err := c.qpackDecoderStr.Write(data)
+
+	return err
 }
 
 // handleQPACKEncoderInstructions ingests the peer's encoder instructions and
@@ -662,14 +664,9 @@ func (c *ClientConn) handleQPACKEncoderInstructions(data []byte) error {
 	before := c.decoder.InsertCount()
 	err := c.decoder.ProcessEncoderInstructions(data)
 	if inserted := c.decoder.InsertCount() - before; inserted > 0 {
-		c.qpackMx.Lock()
-		str := c.qpackDecoderStr
-		c.qpackMx.Unlock()
-		if str != nil {
-			// Insert Count Increment: 00xxxxxx, 6-bit prefix. RFC 9204 4.4.3.
-			if _, werr := str.Write(appendQPACKPrefixedInt(nil, 6, 0x00, inserted)); werr != nil && c.logger != nil {
-				c.logger.Debug("failed to write QPACK Insert Count Increment", "error", werr)
-			}
+		// Insert Count Increment: 00xxxxxx, 6-bit prefix. RFC 9204 4.4.3.
+		if werr := c.writeQPACKDecoderInstruction(appendQPACKPrefixedInt(nil, 6, 0x00, inserted)); werr != nil && c.logger != nil {
+			c.logger.Debug("failed to write QPACK Insert Count Increment", "error", werr)
 		}
 	}
 	return err
