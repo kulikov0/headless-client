@@ -220,7 +220,7 @@ func (w *requestWriter) encodeHeaders(req *http.Request, addGzipHeader bool, tra
 					}
 				}
 			}
-			if !ok || len(vv) == 0 {
+			if !ok {
 				return
 			}
 

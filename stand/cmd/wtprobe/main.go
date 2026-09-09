@@ -60,7 +60,14 @@ func keyLogWriter() (*os.File, error) {
 	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 }
 
-func sendConnect(ctx context.Context, control *http3.RawClientConn, serverName, address, requestPath string) (int, error) {
+func connectHeader(mode, origin string) http.Header {
+	if mode == "current" {
+		return http.Header{}
+	}
+	return headless.ChromeWindows.WebTransportConnectHeader(origin)
+}
+
+func sendConnect(ctx context.Context, control *http3.RawClientConn, serverName, address, requestPath string, header http.Header) (int, error) {
 	_, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return 0, err
@@ -75,7 +82,7 @@ func sendConnect(ctx context.Context, control *http3.RawClientConn, serverName, 
 	}
 	request := (&http.Request{
 		Method: http.MethodConnect,
-		Header: http.Header{},
+		Header: header,
 		Proto:  "webtransport",
 		Host:   target.Host,
 		URL:    target,
@@ -91,7 +98,7 @@ func sendConnect(ctx context.Context, control *http3.RawClientConn, serverName, 
 	return response.StatusCode, nil
 }
 
-func run(address, serverName, mode, requestPath string) error {
+func run(address, serverName, mode, requestPath, origin string) error {
 	additionalSettings, enableDatagrams, err := settingsForMode(mode)
 	if err != nil {
 		return err
@@ -136,6 +143,7 @@ func run(address, serverName, mode, requestPath string) error {
 	transport := &http3.Transport{
 		EnableDatagrams:    enableDatagrams,
 		SendGreaseFrames:   mode != "current",
+		DisableCompression: mode != "current",
 		AdditionalSettings: additionalSettings,
 	}
 	control := transport.NewRawClientConn(conn)
@@ -154,7 +162,10 @@ func run(address, serverName, mode, requestPath string) error {
 		mode, settings.EnableDatagrams, settings.EnableExtendedConnect, settings.Other)
 
 	if requestPath != "" {
-		status, err := sendConnect(dialCtx, control, serverName, address, requestPath)
+		if mode != "current" && origin == "" {
+			return fmt.Errorf("mode %q sends a header block, so it needs an origin argument", mode)
+		}
+		status, err := sendConnect(dialCtx, control, serverName, address, requestPath, connectHeader(mode, origin))
 		if err != nil {
 			fmt.Printf("mode=%s connect failed: %v\n", mode, err)
 		} else {
@@ -195,14 +206,18 @@ func acceptStreams(conn *quic.Conn, control *http3.RawClientConn) {
 
 func main() {
 	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: wtprobe <host:port> <servername> <current|chrome|naive> [path]")
+		fmt.Fprintln(os.Stderr, "usage: wtprobe <host:port> <servername> <current|chrome|naive> [path] [origin]")
 		os.Exit(2)
 	}
 	requestPath := ""
 	if len(os.Args) > 4 {
 		requestPath = os.Args[4]
 	}
-	if err := run(os.Args[1], os.Args[2], os.Args[3], requestPath); err != nil {
+	origin := ""
+	if len(os.Args) > 5 {
+		origin = os.Args[5]
+	}
+	if err := run(os.Args[1], os.Args[2], os.Args[3], requestPath, origin); err != nil {
 		fmt.Fprintf(os.Stderr, "mode=%s FAILED: %v\n", os.Args[3], err)
 		os.Exit(1)
 	}
