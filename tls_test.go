@@ -403,3 +403,64 @@ func TestAFreshClientHelloOmitsTheEmptyPreSharedKey(t *testing.T) {
 		t.Fatalf("the session cache changed the extension set to %v from %v", offered, baseline)
 	}
 }
+
+func requestHeaderSeenByServer(t *testing.T, http2Enabled bool, header http.Header) http.Header {
+	t.Helper()
+
+	received := make(chan http.Header, 1)
+	address, _ := countingTLSServer(t, http2Enabled, func(w http.ResponseWriter, r *http.Request) {
+		received <- r.Header.Clone()
+		io.WriteString(w, "ok")
+	})
+
+	request, err := http.NewRequest(http.MethodGet, "https://example.com/", nil)
+	if err != nil {
+		t.Fatalf("cannot build the request: %v", err)
+	}
+	for name, values := range header {
+		request.Header[name] = values
+	}
+	response, err := pooledClient(address).Do(request)
+	if err != nil {
+		t.Fatalf("http2=%t request: %v", http2Enabled, err)
+	}
+	io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+
+	select {
+	case seen := <-received:
+		return seen
+	default:
+		t.Fatalf("http2=%t the server never saw the request", http2Enabled)
+	}
+
+	return nil
+}
+
+func TestARequestWithoutAUserAgentStillSendsChromes(t *testing.T) {
+	for _, http2Enabled := range []bool{false, true} {
+		got := requestHeaderSeenByServer(t, http2Enabled, nil).Get("User-Agent")
+		if got != ChromeWindows.userAgent {
+			t.Errorf("http2=%t the server saw user-agent %q, chrome sends %q", http2Enabled, got, ChromeWindows.userAgent)
+		}
+	}
+}
+
+func TestANilUserAgentIsStillSuppressed(t *testing.T) {
+	for _, http2Enabled := range []bool{false, true} {
+		seen := requestHeaderSeenByServer(t, http2Enabled, http.Header{"User-Agent": nil})
+		if values, present := seen["User-Agent"]; present {
+			t.Errorf("http2=%t a nil User-Agent reached the server as %v, present-and-empty must suppress it", http2Enabled, values)
+		}
+	}
+}
+
+func TestTheCallerUserAgentSurvivesTheRoundTripper(t *testing.T) {
+	const callerUserAgent = "caller/1.0"
+	for _, http2Enabled := range []bool{false, true} {
+		got := requestHeaderSeenByServer(t, http2Enabled, http.Header{"User-Agent": {callerUserAgent}}).Get("User-Agent")
+		if got != callerUserAgent {
+			t.Errorf("http2=%t the server saw user-agent %q, the caller set %q", http2Enabled, got, callerUserAgent)
+		}
+	}
+}

@@ -211,6 +211,9 @@ func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 	if request.Header.Get("Accept-Encoding") == "" {
 		request.Header.Set("Accept-Encoding", chromeAcceptEncoding)
 	}
+	if _, present := request.Header["User-Agent"]; !present {
+		request.Header.Set("User-Agent", t.profile.userAgent)
+	}
 
 	port := request.URL.Port()
 	if port == "" {
