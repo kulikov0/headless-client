@@ -123,20 +123,27 @@ func mustHex(s string) []byte {
 }
 
 func (p Profile) clientHelloSpec(alpnOverride []string, resumable bool) (*utls.ClientHelloSpec, error) {
-	spec, err := utls.UTLSIdToSpec(p.ClientHelloID())
-	if err != nil {
-		return nil, err
-	}
-	if p.ClientHelloID().Client == utls.HelloChrome_Auto.Client {
-		applyChromeSignatureAlgorithms(&spec)
-	}
-	if p.ClientHelloID().Client == utls.HelloChrome_133.Client {
-		// Chrome 152 pairs the ECH GREASE extension (0xFE0D, already in the
-		// 133 parrot) with an unregistered 0xCA34 extension; without it the
-		// JA4 shape shows 16 extensions while the real browser shows 17
-		// (t13d1517h2_8daaf6152771_cb7bf5808d99, measured on a live capture
-		// stand 2026-09-02). JA4 hashes extension IDs, not payloads.
-		spec.Extensions = append(spec.Extensions, &chromeCA34Extension)
+	var spec utls.ClientHelloSpec
+	if p.ClientHelloID().Client == safariClient {
+		// Safari has no uTLS parrot: build it from the captured hellos.
+		spec = safariHelloSpec(p.ClientHelloID().Version)
+	} else {
+		base, err := utls.UTLSIdToSpec(p.ClientHelloID())
+		if err != nil {
+			return nil, err
+		}
+		if p.ClientHelloID().Client == utls.HelloChrome_Auto.Client {
+			applyChromeSignatureAlgorithms(&base)
+		}
+		if p.ClientHelloID().Client == utls.HelloChrome_133.Client {
+			// Chrome 152 pairs the ECH GREASE extension (0xFE0D, already in the
+			// 133 parrot) with an unregistered 0xCA34 extension; without it the
+			// JA4 shape shows 16 extensions while the real browser shows 17
+			// (t13d1517h2_8daaf6152771_cb7bf5808d99, measured on a live capture
+			// stand 2026-09-02). JA4 hashes extension IDs, not payloads.
+			base.Extensions = append(base.Extensions, &chromeCA34Extension)
+		}
+		spec = base
 	}
 	if alpnOverride != nil {
 		filtered := spec.Extensions[:0]
