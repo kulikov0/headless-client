@@ -53,8 +53,17 @@ var SafariMacOS186 = Profile{
 	clientHelloID:  HelloSafari_18_6,
 }
 
+// 18.6 wire order; 27.0 rotates the first three suites (1302,1303,1301).
 var safariCipherSuites = []uint16{
 	0x1301, 0x1302, 0x1303,
+	0xc02c, 0xc02b, 0xcca9, 0xc030, 0xc02f, 0xcca8,
+	0xc00a, 0xc009, 0xc014, 0xc013,
+	0x009d, 0x009c, 0x0035, 0x002f,
+	0xc008, 0xc012, 0x000a,
+}
+
+var safari27CipherSuites = []uint16{
+	0x1302, 0x1303, 0x1301,
 	0xc02c, 0xc02b, 0xcca9, 0xc030, 0xc02f, 0xcca8,
 	0xc00a, 0xc009, 0xc014, 0xc013,
 	0x009d, 0x009c, 0x0035, 0x002f,
@@ -69,12 +78,15 @@ var safariSignatureAlgorithms = []utls.SignatureScheme{
 
 func safariHelloSpec(version string) utls.ClientHelloSpec {
 	var (
-		groups    *utls.SupportedCurvesExtension
-		keyShares *utls.KeyShareExtension
-		suppVers  *utls.SupportedVersionsExtension
-		tail      []utls.TLSExtension
+		cipherSuites []uint16
+		groups       *utls.SupportedCurvesExtension
+		keyShares    *utls.KeyShareExtension
+		suppVers     *utls.SupportedVersionsExtension
+		tail         []utls.TLSExtension
 	)
+	cipherSuites = safariCipherSuites
 	if version == "27.0" {
+		cipherSuites = safari27CipherSuites
 		groups = &utls.SupportedCurvesExtension{Curves: []utls.CurveID{
 			0xfafa, utls.X25519MLKEM768, utls.X25519, utls.CurveP256, utls.CurveP384, utls.CurveP521,
 		}}
@@ -123,7 +135,7 @@ func safariHelloSpec(version string) utls.ClientHelloSpec {
 	extensions = append(extensions, tail...)
 
 	return utls.ClientHelloSpec{
-		CipherSuites:       append([]uint16{utls.GREASE_PLACEHOLDER}, safariCipherSuites...),
+		CipherSuites:       append([]uint16{utls.GREASE_PLACEHOLDER}, cipherSuites...),
 		CompressionMethods: []byte{0},
 		Extensions:         extensions,
 	}
