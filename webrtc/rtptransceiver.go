@@ -7,6 +7,7 @@ package webrtc
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -107,6 +108,11 @@ func (t *RTPTransceiver) setCodecPreferencesFromRemoteDescription(media *sdp.Med
 	// the transceivers codecs and use payload type registered to
 	// media engine.
 	payloadMapping := make(map[PayloadType]PayloadType) // for RTX re-mapping later
+	offerPositions := make(map[PayloadType]int, len(remoteCodecs))
+	for remotePosition, remoteCodec := range remoteCodecs {
+		offerPositions[remoteCodec.PayloadType] = remotePosition
+	}
+	answerPositions := make(map[PayloadType]int, len(remoteCodecs))
 	filterByMatchType := func(matchFilter codecMatchType) []RTPCodecParameters {
 		filteredCodecs := []RTPCodecParameters{}
 		for remoteCodecIdx := len(remoteCodecs) - 1; remoteCodecIdx >= 0; remoteCodecIdx-- {
@@ -121,6 +127,7 @@ func (t *RTPTransceiver) setCodecPreferencesFromRemoteDescription(media *sdp.Med
 			)
 			if matchType == matchFilter {
 				payloadMapping[remoteCodec.PayloadType] = matchCodec.PayloadType
+				answerPositions[matchCodec.PayloadType] = offerPositions[remoteCodec.PayloadType]
 
 				remoteCodec.PayloadType = matchCodec.PayloadType
 				filteredCodecs = append([]RTPCodecParameters{remoteCodec}, filteredCodecs...)
@@ -173,12 +180,21 @@ func (t *RTPTransceiver) setCodecPreferencesFromRemoteDescription(media *sdp.Med
 
 		for _, rtxCodec := range leftCodecs {
 			if rtxCodec.PayloadType == mediaEngineRTX {
+				answerPositions[mediaEngineRTX] = offerPositions[remoteRTX]
 				filteredCodecs = append(filteredCodecs, rtxCodec)
 
 				break
 			}
 		}
 	}
+
+	sort.SliceStable(filteredCodecs, func(first, second int) bool {
+		firstPosition := answerPositions[filteredCodecs[first].PayloadType]
+		secondPosition := answerPositions[filteredCodecs[second].PayloadType]
+
+		return firstPosition < secondPosition
+	})
+
 	_ = t.SetCodecPreferences(filteredCodecs)
 }
 

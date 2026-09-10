@@ -46,6 +46,7 @@ fi
 gofmt -w "$DST"
 
 apply_patch "$DST" "$UD/webrtc-header-extension-order.patch"
+apply_patch "$DST" "$UD/webrtc-answer-codec-order.patch"
 
 go -C "$REPO" build ./webrtc/...
 echo "webrtc regenerated from $OLD_WEBRTC@$VERSION"
