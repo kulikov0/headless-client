@@ -41,16 +41,8 @@ func sharedKeyLog() io.Writer {
 	return keyLogWriter
 }
 
-func KeyLogWriter() io.Writer {
-	return sharedKeyLog()
-}
-
 func chromeDialer() *net.Dialer {
 	return &net.Dialer{KeepAlive: tcpKeepAliveDisabled}
-}
-
-func ChromeDialer() *net.Dialer {
-	return chromeDialer()
 }
 
 type TLSOptions struct {
@@ -113,12 +105,19 @@ func applyChromeSignatureAlgorithms(spec *utls.ClientHelloSpec) {
 }
 
 func (p Profile) clientHelloSpec(alpnOverride []string, resumable bool) (*utls.ClientHelloSpec, error) {
-	spec, err := utls.UTLSIdToSpec(p.ClientHelloID())
-	if err != nil {
-		return nil, err
-	}
-	if p.ClientHelloID().Client == utls.HelloChrome_Auto.Client {
-		applyChromeSignatureAlgorithms(&spec)
+	var spec utls.ClientHelloSpec
+	if p.ClientHelloID().Client == safariClient {
+		// Safari has no uTLS parrot: build it from the captured hellos.
+		spec = safariHelloSpec(p.ClientHelloID().Version)
+	} else {
+		base, err := utls.UTLSIdToSpec(p.ClientHelloID())
+		if err != nil {
+			return nil, err
+		}
+		if p.ClientHelloID().Client == utls.HelloChrome_Auto.Client {
+			applyChromeSignatureAlgorithms(&base)
+		}
+		spec = base
 	}
 	if alpnOverride != nil {
 		filtered := spec.Extensions[:0]
@@ -221,9 +220,6 @@ func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 	}
 	if _, present := request.Header["User-Agent"]; !present {
 		request.Header.Set("User-Agent", t.profile.userAgent)
-	}
-	if _, present := request.Header["Sec-Fetch-Site"]; present {
-		request.Header.Set("Sec-Fetch-Site", secFetchSiteForRequest(request))
 	}
 
 	port := request.URL.Port()
