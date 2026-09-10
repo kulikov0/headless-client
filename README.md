@@ -197,7 +197,12 @@ reuses the first entry.
 
 ### Profiles
 
-`headless.ChromeWindows` is the only profile. Each builder returns a copy with
+`headless.ChromeWindows` is the Chrome profile. `headless.SafariMacOS`
+(Safari 27.0, macOS 26.6) and `headless.SafariMacOS186` (Safari 18.6,
+macOS 15.7.8) mimic Safari — no client hints, Safari's duplicated
+signature algorithm, ML-KEM key exchange on Safari 27; both JA4s were
+verified byte-for-byte against real Macs on a capture stand. Safari
+profiles send no `sec-ch-ua` headers at all. Each builder returns a copy with
 one part changed and leaves the receiver alone.
 
 ```go

@@ -4,6 +4,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"encoding/hex"
 	"io"
 	"net"
 	"net/http"
@@ -104,13 +105,45 @@ func applyChromeSignatureAlgorithms(spec *utls.ClientHelloSpec) {
 	}
 }
 
-func (p Profile) clientHelloSpec(alpnOverride []string, resumable bool) (*utls.ClientHelloSpec, error) {
-	spec, err := utls.UTLSIdToSpec(p.ClientHelloID())
+// chromeCA34Extension is the unregistered extension Chrome 152 sends next
+// to the ECH GREASE pair (captured on the wire 2026-09-02). JA4 only hashes
+// extension IDs, so the payload staying constant keeps JA4 correct while
+// Chrome may rotate the bytes per build.
+var chromeCA34Extension = utls.GenericExtension{
+	Id:   0xCA34,
+	Data: mustHex("00b808839a648c9b2d01080582df1302130582df13020608839a648c9b2d010908839a648c9b2d010704d679090b04d67909050582df1302120582df13020f08839a648c9b2d010c0582df13021404d679090708839a648c9b2d010a08839a648c9b2d010b0582df13020e0582df13020104d679090104d679090408839a648c9b2d010d04d679090808839a648c9b2d011204d679090f04d67909060582df13020d04d679090a04d679090d04d679090c08839a648c9b2d0113"),
+}
+
+func mustHex(s string) []byte {
+	b, err := hex.DecodeString(s)
 	if err != nil {
-		return nil, err
+		panic("headless-client: bad hex constant: " + err.Error())
 	}
-	if p.ClientHelloID().Client == utls.HelloChrome_Auto.Client {
-		applyChromeSignatureAlgorithms(&spec)
+	return b
+}
+
+func (p Profile) clientHelloSpec(alpnOverride []string, resumable bool) (*utls.ClientHelloSpec, error) {
+	var spec utls.ClientHelloSpec
+	if p.ClientHelloID().Client == safariClient {
+		// Safari has no uTLS parrot: build it from the captured hellos.
+		spec = safariHelloSpec(p.ClientHelloID().Version)
+	} else {
+		base, err := utls.UTLSIdToSpec(p.ClientHelloID())
+		if err != nil {
+			return nil, err
+		}
+		if p.ClientHelloID().Client == utls.HelloChrome_Auto.Client {
+			applyChromeSignatureAlgorithms(&base)
+		}
+		if p.ClientHelloID().Client == utls.HelloChrome_133.Client {
+			// Chrome 152 pairs the ECH GREASE extension (0xFE0D, already in the
+			// 133 parrot) with an unregistered 0xCA34 extension; without it the
+			// JA4 shape shows 16 extensions while the real browser shows 17
+			// (t13d1517h2_8daaf6152771_cb7bf5808d99, measured on a live capture
+			// stand 2026-09-02). JA4 hashes extension IDs, not payloads.
+			base.Extensions = append(base.Extensions, &chromeCA34Extension)
+		}
+		spec = base
 	}
 	if alpnOverride != nil {
 		filtered := spec.Extensions[:0]
