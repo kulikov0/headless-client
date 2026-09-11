@@ -17,9 +17,24 @@ import (
 	"sync/atomic"
 
 	"github.com/kulikov0/headless-client/internal/ice"
+	"github.com/kulikov0/headless-client/internal/sdporder"
 	"github.com/pion/logging"
 	"github.com/pion/sdp/v3"
 )
+
+const (
+	chromeRTCPAttributeValue = "9 IN IP4 0.0.0.0"
+	chromeICEOptionsValue    = "trickle"
+	chromeSCTPSendBufferSize = 256 * 1024
+)
+
+func reorderMediaAttributes(media *sdp.MediaDescription) *sdp.MediaDescription {
+	media.Attributes = sdporder.Reorder(sdporder.LevelMedia, media.Attributes, func(attribute sdp.Attribute) string {
+		return attribute.Key
+	})
+
+	return media
+}
 
 // trackDetails represents any media source that can be represented in a SDP
 // This isn't keyed by SSRC because it also needs to support rid based sources.
@@ -388,9 +403,9 @@ func addDataMediaSection(
 	}).
 		WithValueAttribute(sdp.AttrKeyConnectionSetup, dtlsRole.String()).
 		WithValueAttribute(sdp.AttrKeyMID, midValue).
-		WithPropertyAttribute(RTPTransceiverDirectionSendrecv.String()).
+		WithValueAttribute("ice-options", chromeICEOptionsValue).
 		WithPropertyAttribute("sctp-port:5000").
-		WithValueAttribute("max-message-size", fmt.Sprintf("%d", sctpMaxMessageSize)).
+		WithValueAttribute("max-message-size", fmt.Sprintf("%d", min(sctpMaxMessageSize, chromeSCTPSendBufferSize))).
 		WithICECredentials(iceParams.UsernameFragment, iceParams.Password)
 
 	if len(sctpInit) != 0 {
@@ -406,7 +421,7 @@ func addDataMediaSection(
 		}
 	}
 
-	descr.WithMedia(media)
+	descr.WithMedia(reorderMediaAttributes(media))
 
 	return nil
 }
@@ -431,6 +446,7 @@ func populateLocalCandidates(
 		if err = addCandidatesToMediaDescriptions(candidates, mediaDescr, iceGatheringState); err != nil {
 			return sessionDescription
 		}
+		reorderMediaAttributes(mediaDescr)
 	}
 
 	sdp, err := parsed.Marshal()
@@ -562,8 +578,10 @@ func addTransceiverSDP(
 	// Use the first transceiver to generate the section attributes
 	transceiver := transceivers[0]
 	media := sdp.NewJSEPMediaDescription(transceiver.kind.String(), []string{}).
+		WithValueAttribute("rtcp", chromeRTCPAttributeValue).
 		WithValueAttribute(sdp.AttrKeyConnectionSetup, dtlsRole.String()).
 		WithValueAttribute(sdp.AttrKeyMID, midValue).
+		WithValueAttribute("ice-options", chromeICEOptionsValue).
 		WithICECredentials(iceParams.UsernameFragment, iceParams.Password).
 		WithPropertyAttribute(sdp.AttrKeyRTCPMux).
 		WithPropertyAttribute(sdp.AttrKeyRTCPRsize)
@@ -669,7 +687,7 @@ func addTransceiverSDP(
 		}
 	}
 
-	descr.WithMedia(media)
+	descr.WithMedia(reorderMediaAttributes(media))
 
 	return true, nil
 }
@@ -811,6 +829,10 @@ func populateSDP(
 	if bundleCount > 0 {
 		descr = descr.WithValueAttribute(sdp.AttrKeyGroup, bundleValue)
 	}
+
+	descr.Attributes = sdporder.Reorder(sdporder.LevelSession, descr.Attributes, func(attribute sdp.Attribute) string {
+		return attribute.Key
+	})
 
 	return descr, nil
 }

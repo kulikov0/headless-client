@@ -56,6 +56,7 @@ apply_patch "$DST" "$UD/webrtc-track-constructor-args.patch"
 apply_patch "$DST" "$UD/webrtc-session-origin.patch"
 apply_patch "$DST" "$UD/webrtc-codec-feedback.patch"
 apply_patch "$DST" "$UD/webrtc-answer-feedback-order.patch"
+apply_patch "$DST" "$UD/webrtc-attribute-order.patch"
 
 go -C "$REPO" build ./webrtc/...
 echo "webrtc regenerated from $OLD_WEBRTC@$VERSION"
