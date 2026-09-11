@@ -1,0 +1,135 @@
+--- a/peerconnection.go	2026-09-11 12:23:11
++++ b/peerconnection.go	2026-09-11 12:23:11
+@@ -24,11 +24,17 @@
+ 	"github.com/pion/interceptor"
+ 	"github.com/pion/interceptor/pkg/stats"
+ 	"github.com/pion/logging"
++	"github.com/pion/randutil"
+ 	"github.com/pion/rtcp"
+ 	"github.com/pion/sdp/v3"
+ 	"github.com/pion/srtp/v3"
+ )
+ 
++const (
++	rtcpCnameLength   = 16
++	rtcpCnameAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
++)
++
+ // PeerConnection represents a WebRTC connection that establishes a
+ // peer-to-peer communications with another PeerConnection instance in a
+ // browser, or to another endpoint implementing the required protocols.
+@@ -44,6 +50,8 @@
+ 	ops *operations
+ 
+ 	configuration Configuration
++
++	rtcpCname string
+ 
+ 	currentLocalDescription  *SessionDescription
+ 	pendingLocalDescription  *SessionDescription
+@@ -116,6 +124,11 @@
+ 	// https://w3c.github.io/webrtc-pc/#constructor (Step #2)
+ 	// Some variables defined explicitly despite their implicit zero values to
+ 	// allow better readability to understand what is happening.
++
++	rtcpCname, err := randutil.GenerateCryptoRandomString(rtcpCnameLength, rtcpCnameAlphabet)
++	if err != nil {
++		return nil, err
++	}
+ 
+ 	pc := &PeerConnection{
+ 		id: fmt.Sprintf("PeerConnection-%d", time.Now().UnixNano()),
+@@ -127,6 +140,7 @@
+ 			Certificates:         []Certificate{},
+ 			ICECandidatePoolSize: 0,
+ 		},
++		rtcpCname:                               rtcpCname,
+ 		isClosed:                                &atomic.Bool{},
+ 		isCloseDone:                             make(chan struct{}),
+ 		isGracefulCloseDone:                     make(chan struct{}),
+@@ -2928,6 +2942,7 @@
+ 		nil,
+ 		pc.api.settingEngine.getSCTPMaxMessageSize(),
+ 		false,
++		pc.rtcpCname,
+ 	)
+ }
+ 
+@@ -3113,6 +3128,7 @@
+ 		bundleGroup,
+ 		pc.api.settingEngine.getSCTPMaxMessageSize(),
+ 		ignoreRidPauseForRecv,
++		pc.rtcpCname,
+ 	)
+ }
+ 
+--- a/sdp.go	2026-09-11 12:23:11
++++ b/sdp.go	2026-09-11 12:23:11
+@@ -450,6 +450,7 @@
+ 	mediaSection mediaSection,
+ 	isPlanB bool,
+ 	media *sdp.MediaDescription,
++	rtcpCname string,
+ ) {
+ 	for _, mt := range mediaSection.transceivers {
+ 		sender := mt.Sender()
+@@ -489,7 +490,7 @@
+ 
+ 			media = media.WithMediaSource(
+ 				uint32(encoding.SSRC),
+-				track.StreamID(), /* cname */
++				rtcpCname, /* cname */
+ 				track.StreamID(), /* streamLabel */
+ 				track.ID(),
+ 			)
+@@ -498,7 +499,7 @@
+ 				if encoding.RTX.SSRC != 0 {
+ 					media = media.WithMediaSource(
+ 						uint32(encoding.RTX.SSRC),
+-						track.StreamID(), /* cname */
++						rtcpCname, /* cname */
+ 						track.StreamID(), /* streamLabel */
+ 						track.ID(),
+ 					)
+@@ -506,7 +507,7 @@
+ 				if encoding.FEC.SSRC != 0 {
+ 					media = media.WithMediaSource(
+ 						uint32(encoding.FEC.SSRC),
+-						track.StreamID(), /* cname */
++						rtcpCname, /* cname */
+ 						track.StreamID(), /* streamLabel */
+ 						track.ID(),
+ 					)
+@@ -547,6 +548,7 @@
+ 	iceGatheringState ICEGatheringState,
+ 	mediaSection mediaSection,
+ 	ignoreRidPauseForRecv bool,
++	rtcpCname string,
+ ) (bool, error) {
+ 	transceivers := mediaSection.transceivers
+ 	if len(transceivers) < 1 {
+@@ -644,7 +646,7 @@
+ 		media.WithValueAttribute(sdpAttributeSimulcast, "recv "+strings.Join(recvRids, ";"))
+ 	}
+ 
+-	addSenderSDP(mediaSection, isPlanB, media)
++	addSenderSDP(mediaSection, isPlanB, media, rtcpCname)
+ 
+ 	media = media.WithPropertyAttribute(transceiver.Direction().String())
+ 
+@@ -710,6 +712,7 @@
+ 	matchBundleGroup *string,
+ 	sctpMaxMessageSize uint32,
+ 	ignoreRidPauseForRecv bool,
++	rtcpCname string,
+ ) (*sdp.SessionDescription, error) {
+ 	var err error
+ 	mediaDtlsFingerprints := []DTLSFingerprint{}
+@@ -765,6 +768,7 @@
+ 				iceGatheringState,
+ 				section,
+ 				ignoreRidPauseForRecv,
++				rtcpCname,
+ 			)
+ 			if err != nil {
+ 				return nil, err

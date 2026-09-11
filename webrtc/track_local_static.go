@@ -9,10 +9,13 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/kulikov0/headless-client/webrtc/internal/util"
 	"github.com/kulikov0/headless-client/webrtc/pkg/media"
 	"github.com/pion/rtp"
 )
+
+const msidNoStreamID = "-"
 
 // trackBinding is a single bind for a Track
 // Bind can be called multiple times, this stores the
@@ -45,8 +48,8 @@ func NewTrackLocalStaticRTP(
 	t := &TrackLocalStaticRTP{
 		codec:    c,
 		bindings: []trackBinding{},
-		id:       id,
-		streamID: streamID,
+		id:       uuid.NewString(),
+		streamID: msidNoStreamID,
 	}
 
 	for _, option := range options {

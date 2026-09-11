@@ -1,0 +1,53 @@
+--- a/sdp.go	2026-09-11 13:49:37
++++ b/sdp.go	2026-09-11 13:49:37
+@@ -443,6 +443,17 @@
+ 		Type:   sessionDescription.Type,
+ 		parsed: parsed,
+ 	}
++}
++
++func withSSRCIdentity(
++	media *sdp.MediaDescription,
++	ssrc SSRC,
++	rtcpCname string,
++	track TrackLocal,
++) *sdp.MediaDescription {
++	return media.
++		WithValueAttribute(sdp.AttrKeySSRC, fmt.Sprintf("%d cname:%s", ssrc, rtcpCname)).
++		WithValueAttribute(sdp.AttrKeySSRC, fmt.Sprintf("%d msid:%s %s", ssrc, track.StreamID(), track.ID()))
+ }
+ 
+ //nolint:gocognit,cyclop
+@@ -488,29 +499,14 @@
+ 				)
+ 			}
+ 
+-			media = media.WithMediaSource(
+-				uint32(encoding.SSRC),
+-				rtcpCname, /* cname */
+-				track.StreamID(), /* streamLabel */
+-				track.ID(),
+-			)
++			media = withSSRCIdentity(media, encoding.SSRC, rtcpCname, track)
+ 
+ 			if !isPlanB {
+ 				if encoding.RTX.SSRC != 0 {
+-					media = media.WithMediaSource(
+-						uint32(encoding.RTX.SSRC),
+-						rtcpCname, /* cname */
+-						track.StreamID(), /* streamLabel */
+-						track.ID(),
+-					)
++					media = withSSRCIdentity(media, encoding.RTX.SSRC, rtcpCname, track)
+ 				}
+ 				if encoding.FEC.SSRC != 0 {
+-					media = media.WithMediaSource(
+-						uint32(encoding.FEC.SSRC),
+-						rtcpCname, /* cname */
+-						track.StreamID(), /* streamLabel */
+-						track.ID(),
+-					)
++					media = withSSRCIdentity(media, encoding.FEC.SSRC, rtcpCname, track)
+ 				}
+ 
+ 				media = media.WithPropertyAttribute("msid:" + track.StreamID() + " " + track.ID())

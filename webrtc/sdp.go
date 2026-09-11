@@ -445,11 +445,30 @@ func populateLocalCandidates(
 	}
 }
 
+func withSSRCIdentity(
+	media *sdp.MediaDescription,
+	ssrc SSRC,
+	identity sourceIdentity,
+	track TrackLocal,
+) *sdp.MediaDescription {
+	media = media.WithValueAttribute(sdp.AttrKeySSRC, fmt.Sprintf("%d cname:%s", ssrc, identity.cname))
+
+	if !identity.emitSsrcMsid {
+		return media
+	}
+
+	return media.WithValueAttribute(
+		sdp.AttrKeySSRC,
+		fmt.Sprintf("%d msid:%s %s", ssrc, track.StreamID(), track.ID()),
+	)
+}
+
 //nolint:gocognit,cyclop
 func addSenderSDP(
 	mediaSection mediaSection,
 	isPlanB bool,
 	media *sdp.MediaDescription,
+	identity sourceIdentity,
 ) {
 	for _, mt := range mediaSection.transceivers {
 		sender := mt.Sender()
@@ -487,32 +506,19 @@ func addSenderSDP(
 				)
 			}
 
-			media = media.WithMediaSource(
-				uint32(encoding.SSRC),
-				track.StreamID(), /* cname */
-				track.StreamID(), /* streamLabel */
-				track.ID(),
-			)
+			media = withSSRCIdentity(media, encoding.SSRC, identity, track)
 
 			if !isPlanB {
 				if encoding.RTX.SSRC != 0 {
-					media = media.WithMediaSource(
-						uint32(encoding.RTX.SSRC),
-						track.StreamID(), /* cname */
-						track.StreamID(), /* streamLabel */
-						track.ID(),
-					)
+					media = withSSRCIdentity(media, encoding.RTX.SSRC, identity, track)
 				}
 				if encoding.FEC.SSRC != 0 {
-					media = media.WithMediaSource(
-						uint32(encoding.FEC.SSRC),
-						track.StreamID(), /* cname */
-						track.StreamID(), /* streamLabel */
-						track.ID(),
-					)
+					media = withSSRCIdentity(media, encoding.FEC.SSRC, identity, track)
 				}
 
-				media = media.WithPropertyAttribute("msid:" + track.StreamID() + " " + track.ID())
+				if identity.emitMediaSectionMsid {
+					media = media.WithPropertyAttribute("msid:" + track.StreamID() + " " + track.ID())
+				}
 			}
 		}
 
@@ -547,6 +553,7 @@ func addTransceiverSDP(
 	iceGatheringState ICEGatheringState,
 	mediaSection mediaSection,
 	ignoreRidPauseForRecv bool,
+	identity sourceIdentity,
 ) (bool, error) {
 	transceivers := mediaSection.transceivers
 	if len(transceivers) < 1 {
@@ -644,7 +651,7 @@ func addTransceiverSDP(
 		media.WithValueAttribute(sdpAttributeSimulcast, "recv "+strings.Join(recvRids, ";"))
 	}
 
-	addSenderSDP(mediaSection, isPlanB, media)
+	addSenderSDP(mediaSection, isPlanB, media, identity)
 
 	media = media.WithPropertyAttribute(transceiver.Direction().String())
 
@@ -710,6 +717,7 @@ func populateSDP(
 	matchBundleGroup *string,
 	sctpMaxMessageSize uint32,
 	ignoreRidPauseForRecv bool,
+	identity sourceIdentity,
 ) (*sdp.SessionDescription, error) {
 	var err error
 	mediaDtlsFingerprints := []DTLSFingerprint{}
@@ -765,6 +773,7 @@ func populateSDP(
 				iceGatheringState,
 				section,
 				ignoreRidPauseForRecv,
+				identity,
 			)
 			if err != nil {
 				return nil, err

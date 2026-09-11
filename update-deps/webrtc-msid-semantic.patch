@@ -1,0 +1,28 @@
+--- a/peerconnection.go	2026-09-11 13:54:53
++++ b/peerconnection.go	2026-09-11 13:55:58
+@@ -33,6 +33,7 @@
+ const (
+ 	rtcpCnameLength   = 16
+ 	rtcpCnameAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
++	msidSemanticValue = " WMS"
+ )
+ 
+ // PeerConnection represents a WebRTC connection that establishes a
+@@ -2855,7 +2856,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	desc.Attributes = append(desc.Attributes, sdp.Attribute{Key: sdp.AttrKeyMsidSemantic, Value: "WMS *"})
++	desc.Attributes = append(desc.Attributes, sdp.Attribute{Key: sdp.AttrKeyMsidSemantic, Value: msidSemanticValue})
+ 
+ 	iceParams, err := pc.iceGatherer.GetLocalParameters()
+ 	if err != nil {
+@@ -2960,7 +2961,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	desc.Attributes = append(desc.Attributes, sdp.Attribute{Key: sdp.AttrKeyMsidSemantic, Value: "WMS *"})
++	desc.Attributes = append(desc.Attributes, sdp.Attribute{Key: sdp.AttrKeyMsidSemantic, Value: msidSemanticValue})
+ 
+ 	iceParams, err := pc.iceGatherer.GetLocalParameters()
+ 	if err != nil {

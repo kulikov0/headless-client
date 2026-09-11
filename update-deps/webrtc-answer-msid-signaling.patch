@@ -1,0 +1,188 @@
+--- a/peerconnection.go	2026-09-11 14:10:13
++++ b/peerconnection.go	2026-09-11 14:13:01
+@@ -768,6 +768,7 @@
+ 				true, /*includeUnmatched */
+ 				connectionRoleFromDtlsRole(defaultDtlsRoleOffer),
+ 				false,
++				pc.offerSourceIdentity(),
+ 			)
+ 		}
+ 
+@@ -950,6 +951,7 @@
+ 		false, /*includeUnmatched */
+ 		connectionRole,
+ 		pc.api.settingEngine.ignoreRidPauseForRecv,
++		pc.answerSourceIdentity(),
+ 	)
+ 	if err != nil {
+ 		return SessionDescription{}, err
+@@ -2841,7 +2843,48 @@
+ 	if d := haveDataChannel(remoteDesc); d != nil && d.MediaName.Port.Value != 0 {
+ 		remoteSctpInit, _ := getSctpInit(d)
+ 		pc.startSCTP(getMaxMessageSize(d), remoteSctpInit)
++	}
++}
++
++type sourceIdentity struct {
++	cname                string
++	emitMediaSectionMsid bool
++	emitSsrcMsid         bool
++}
++
++func (pc *PeerConnection) offerSourceIdentity() sourceIdentity {
++	return sourceIdentity{
++		cname:                pc.rtcpCname,
++		emitMediaSectionMsid: true,
++		emitSsrcMsid:         true,
++	}
++}
++
++func (pc *PeerConnection) answerSourceIdentity() sourceIdentity {
++	remoteDescription := pc.pendingRemoteDescription
++	if remoteDescription == nil {
++		remoteDescription = pc.currentRemoteDescription
++	}
++
++	offeredMediaSectionMsid, offeredSsrcMsid := false, false
++	if remoteDescription != nil && remoteDescription.parsed != nil {
++		for _, media := range remoteDescription.parsed.MediaDescriptions {
++			for _, attribute := range media.Attributes {
++				switch {
++				case attribute.Key == sdp.AttrKeyMsid:
++					offeredMediaSectionMsid = true
++				case attribute.Key == sdp.AttrKeySSRC && strings.Contains(attribute.Value, " msid:"):
++					offeredSsrcMsid = true
++				}
++			}
++		}
+ 	}
++
++	if offeredSsrcMsid && !offeredMediaSectionMsid {
++		return sourceIdentity{cname: pc.rtcpCname, emitSsrcMsid: true}
++	}
++
++	return sourceIdentity{cname: pc.rtcpCname, emitMediaSectionMsid: true}
+ }
+ 
+ // generateUnmatchedSDP generates an SDP that doesn't take remote state into account.
+@@ -2943,7 +2986,7 @@
+ 		nil,
+ 		pc.api.settingEngine.getSCTPMaxMessageSize(),
+ 		false,
+-		pc.rtcpCname,
++		pc.offerSourceIdentity(),
+ 	)
+ }
+ 
+@@ -2956,6 +2999,7 @@
+ 	useIdentity, includeUnmatched bool,
+ 	connectionRole sdp.ConnectionRole,
+ 	ignoreRidPauseForRecv bool,
++	identity sourceIdentity,
+ ) (*sdp.SessionDescription, error) {
+ 	desc, err := sdp.NewJSEPSessionDescription(useIdentity)
+ 	if err != nil {
+@@ -3129,7 +3173,7 @@
+ 		bundleGroup,
+ 		pc.api.settingEngine.getSCTPMaxMessageSize(),
+ 		ignoreRidPauseForRecv,
+-		pc.rtcpCname,
++		identity,
+ 	)
+ }
+ 
+--- a/sdp.go	2026-09-11 14:10:13
++++ b/sdp.go	2026-09-11 14:13:01
+@@ -448,12 +448,19 @@
+ func withSSRCIdentity(
+ 	media *sdp.MediaDescription,
+ 	ssrc SSRC,
+-	rtcpCname string,
++	identity sourceIdentity,
+ 	track TrackLocal,
+ ) *sdp.MediaDescription {
+-	return media.
+-		WithValueAttribute(sdp.AttrKeySSRC, fmt.Sprintf("%d cname:%s", ssrc, rtcpCname)).
+-		WithValueAttribute(sdp.AttrKeySSRC, fmt.Sprintf("%d msid:%s %s", ssrc, track.StreamID(), track.ID()))
++	media = media.WithValueAttribute(sdp.AttrKeySSRC, fmt.Sprintf("%d cname:%s", ssrc, identity.cname))
++
++	if !identity.emitSsrcMsid {
++		return media
++	}
++
++	return media.WithValueAttribute(
++		sdp.AttrKeySSRC,
++		fmt.Sprintf("%d msid:%s %s", ssrc, track.StreamID(), track.ID()),
++	)
+ }
+ 
+ //nolint:gocognit,cyclop
+@@ -461,7 +468,7 @@
+ 	mediaSection mediaSection,
+ 	isPlanB bool,
+ 	media *sdp.MediaDescription,
+-	rtcpCname string,
++	identity sourceIdentity,
+ ) {
+ 	for _, mt := range mediaSection.transceivers {
+ 		sender := mt.Sender()
+@@ -499,17 +506,19 @@
+ 				)
+ 			}
+ 
+-			media = withSSRCIdentity(media, encoding.SSRC, rtcpCname, track)
++			media = withSSRCIdentity(media, encoding.SSRC, identity, track)
+ 
+ 			if !isPlanB {
+ 				if encoding.RTX.SSRC != 0 {
+-					media = withSSRCIdentity(media, encoding.RTX.SSRC, rtcpCname, track)
++					media = withSSRCIdentity(media, encoding.RTX.SSRC, identity, track)
+ 				}
+ 				if encoding.FEC.SSRC != 0 {
+-					media = withSSRCIdentity(media, encoding.FEC.SSRC, rtcpCname, track)
++					media = withSSRCIdentity(media, encoding.FEC.SSRC, identity, track)
+ 				}
+ 
+-				media = media.WithPropertyAttribute("msid:" + track.StreamID() + " " + track.ID())
++				if identity.emitMediaSectionMsid {
++					media = media.WithPropertyAttribute("msid:" + track.StreamID() + " " + track.ID())
++				}
+ 			}
+ 		}
+ 
+@@ -544,7 +553,7 @@
+ 	iceGatheringState ICEGatheringState,
+ 	mediaSection mediaSection,
+ 	ignoreRidPauseForRecv bool,
+-	rtcpCname string,
++	identity sourceIdentity,
+ ) (bool, error) {
+ 	transceivers := mediaSection.transceivers
+ 	if len(transceivers) < 1 {
+@@ -642,7 +651,7 @@
+ 		media.WithValueAttribute(sdpAttributeSimulcast, "recv "+strings.Join(recvRids, ";"))
+ 	}
+ 
+-	addSenderSDP(mediaSection, isPlanB, media, rtcpCname)
++	addSenderSDP(mediaSection, isPlanB, media, identity)
+ 
+ 	media = media.WithPropertyAttribute(transceiver.Direction().String())
+ 
+@@ -708,7 +717,7 @@
+ 	matchBundleGroup *string,
+ 	sctpMaxMessageSize uint32,
+ 	ignoreRidPauseForRecv bool,
+-	rtcpCname string,
++	identity sourceIdentity,
+ ) (*sdp.SessionDescription, error) {
+ 	var err error
+ 	mediaDtlsFingerprints := []DTLSFingerprint{}
+@@ -764,7 +773,7 @@
+ 				iceGatheringState,
+ 				section,
+ 				ignoreRidPauseForRecv,
+-				rtcpCname,
++				identity,
+ 			)
+ 			if err != nil {
+ 				return nil, err
