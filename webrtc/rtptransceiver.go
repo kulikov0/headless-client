@@ -130,6 +130,10 @@ func (t *RTPTransceiver) setCodecPreferencesFromRemoteDescription(media *sdp.Med
 				answerPositions[matchCodec.PayloadType] = offerPositions[remoteCodec.PayloadType]
 
 				remoteCodec.PayloadType = matchCodec.PayloadType
+				remoteCodec.RTPCodecCapability.RTCPFeedback = intersectRTCPFeedback(
+					matchCodec.RTPCodecCapability.RTCPFeedback,
+					remoteCodec.RTPCodecCapability.RTCPFeedback,
+				)
 				filteredCodecs = append([]RTPCodecParameters{remoteCodec}, filteredCodecs...)
 
 				// removed matched codec for next round
@@ -196,6 +200,22 @@ func (t *RTPTransceiver) setCodecPreferencesFromRemoteDescription(media *sdp.Med
 	})
 
 	_ = t.SetCodecPreferences(filteredCodecs)
+}
+
+func intersectRTCPFeedback(ours, theirs []RTCPFeedback) []RTCPFeedback {
+	kept := []RTCPFeedback{}
+	for _, feedback := range ours {
+		for _, remoteFeedback := range theirs {
+			if strings.EqualFold(feedback.Type, remoteFeedback.Type) &&
+				strings.EqualFold(feedback.Parameter, remoteFeedback.Parameter) {
+				kept = append(kept, feedback)
+
+				break
+			}
+		}
+	}
+
+	return kept
 }
 
 // Sender returns the RTPTransceiver's RTPSender if it has one.

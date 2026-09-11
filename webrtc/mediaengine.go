@@ -68,8 +68,11 @@ func (m *MediaEngine) RegisterDefaultCodecs() error {
 	// Default Pion Audio Codecs
 	for _, codec := range []RTPCodecParameters{
 		{
-			RTPCodecCapability: RTPCodecCapability{MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1", nil},
-			PayloadType:        111,
+			RTPCodecCapability: RTPCodecCapability{
+				MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1",
+				[]RTCPFeedback{{TypeRTCPFBTransportCC, ""}},
+			},
+			PayloadType: 111,
 		},
 		{
 			RTPCodecCapability: RTPCodecCapability{MimeTypeG722, 8000, 0, "", nil},
@@ -89,7 +92,13 @@ func (m *MediaEngine) RegisterDefaultCodecs() error {
 		}
 	}
 
-	videoRTCPFeedback := []RTCPFeedback{{"goog-remb", ""}, {"ccm", "fir"}, {"nack", ""}, {"nack", "pli"}}
+	videoRTCPFeedback := []RTCPFeedback{
+		{"goog-remb", ""},
+		{TypeRTCPFBTransportCC, ""},
+		{"ccm", "fir"},
+		{"nack", ""},
+		{"nack", "pli"},
+	}
 	for _, codec := range []RTPCodecParameters{
 		{
 			RTPCodecCapability: RTPCodecCapability{MimeTypeVP8, 90000, 0, "", videoRTCPFeedback},
@@ -343,15 +352,34 @@ func (m *MediaEngine) RegisterFeedback(feedback RTCPFeedback, typ RTPCodecType) 
 	switch typ {
 	case RTPCodecTypeVideo:
 		for i, v := range m.videoCodecs {
+			if isResiliencyCodec(v.MimeType) {
+				continue
+			}
 			v.RTCPFeedback = addUniqueFeedback(v.RTCPFeedback)
 			m.videoCodecs[i] = v
 		}
 	case RTPCodecTypeAudio:
 		for i, v := range m.audioCodecs {
+			if isResiliencyCodec(v.MimeType) {
+				continue
+			}
 			v.RTCPFeedback = addUniqueFeedback(v.RTCPFeedback)
 			m.audioCodecs[i] = v
 		}
 	default:
+	}
+}
+
+func isResiliencyCodec(mimeType string) bool {
+	_, subtype, found := strings.Cut(mimeType, "/")
+	if !found {
+		subtype = mimeType
+	}
+	switch strings.ToLower(subtype) {
+	case "rtx", "red", "ulpfec", "flexfec-03":
+		return true
+	default:
+		return false
 	}
 }
 

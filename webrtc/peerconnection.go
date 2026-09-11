@@ -31,9 +31,11 @@ import (
 )
 
 const (
-	rtcpCnameLength   = 16
-	rtcpCnameAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	msidSemanticValue = " WMS"
+	rtcpCnameLength      = 16
+	rtcpCnameAlphabet    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	msidSemanticValue    = " WMS"
+	sessionOriginVersion = 2
+	sessionOriginAddress = "127.0.0.1"
 )
 
 // PeerConnection represents a WebRTC connection that establishes a
@@ -2899,6 +2901,8 @@ func (pc *PeerConnection) generateUnmatchedSDP(
 	if err != nil {
 		return nil, err
 	}
+	desc.Origin.SessionVersion = sessionOriginVersion
+	desc.Origin.UnicastAddress = sessionOriginAddress
 	desc.Attributes = append(desc.Attributes, sdp.Attribute{Key: sdp.AttrKeyMsidSemantic, Value: msidSemanticValue})
 
 	iceParams, err := pc.iceGatherer.GetLocalParameters()
@@ -3005,6 +3009,8 @@ func (pc *PeerConnection) generateMatchedSDP(
 	if err != nil {
 		return nil, err
 	}
+	desc.Origin.SessionVersion = sessionOriginVersion
+	desc.Origin.UnicastAddress = sessionOriginAddress
 	desc.Attributes = append(desc.Attributes, sdp.Attribute{Key: sdp.AttrKeyMsidSemantic, Value: msidSemanticValue})
 
 	iceParams, err := pc.iceGatherer.GetLocalParameters()

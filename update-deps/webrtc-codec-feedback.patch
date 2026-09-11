@@ -1,0 +1,101 @@
+--- a/interceptor.go
++++ b/interceptor.go
+@@ -209,7 +209,6 @@ func ConfigureTWCCSenderWithOptions(mediaEngine *MediaEngine, interceptorRegistr
+ 		return err
+ 	}
+ 
+-	mediaEngine.RegisterFeedback(RTCPFeedback{Type: TypeRTCPFBTransportCC}, RTPCodecTypeAudio)
+ 	if err := mediaEngine.RegisterHeaderExtension(
+ 		RTPHeaderExtensionCapability{URI: sdp.TransportCCURI}, RTPCodecTypeAudio,
+ 	); err != nil {
+--- a/mediaengine.go
++++ b/mediaengine.go
+@@ -68,8 +68,11 @@ func (m *MediaEngine) RegisterDefaultCodecs() error {
+ 	// Default Pion Audio Codecs
+ 	for _, codec := range []RTPCodecParameters{
+ 		{
+-			RTPCodecCapability: RTPCodecCapability{MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1", nil},
+-			PayloadType:        111,
++			RTPCodecCapability: RTPCodecCapability{
++				MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1",
++				[]RTCPFeedback{{TypeRTCPFBTransportCC, ""}},
++			},
++			PayloadType: 111,
+ 		},
+ 		{
+ 			RTPCodecCapability: RTPCodecCapability{MimeTypeG722, 8000, 0, "", nil},
+@@ -89,7 +92,13 @@ func (m *MediaEngine) RegisterDefaultCodecs() error {
+ 		}
+ 	}
+ 
+-	videoRTCPFeedback := []RTCPFeedback{{"goog-remb", ""}, {"ccm", "fir"}, {"nack", ""}, {"nack", "pli"}}
++	videoRTCPFeedback := []RTCPFeedback{
++		{"goog-remb", ""},
++		{TypeRTCPFBTransportCC, ""},
++		{"ccm", "fir"},
++		{"nack", ""},
++		{"nack", "pli"},
++	}
+ 	for _, codec := range []RTPCodecParameters{
+ 		{
+ 			RTPCodecCapability: RTPCodecCapability{MimeTypeVP8, 90000, 0, "", videoRTCPFeedback},
+@@ -343,11 +352,17 @@ func (m *MediaEngine) RegisterFeedback(feedback RTCPFeedback, typ RTPCodecType)
+ 	switch typ {
+ 	case RTPCodecTypeVideo:
+ 		for i, v := range m.videoCodecs {
++			if isResiliencyCodec(v.MimeType) {
++				continue
++			}
+ 			v.RTCPFeedback = addUniqueFeedback(v.RTCPFeedback)
+ 			m.videoCodecs[i] = v
+ 		}
+ 	case RTPCodecTypeAudio:
+ 		for i, v := range m.audioCodecs {
++			if isResiliencyCodec(v.MimeType) {
++				continue
++			}
+ 			v.RTCPFeedback = addUniqueFeedback(v.RTCPFeedback)
+ 			m.audioCodecs[i] = v
+ 		}
+@@ -355,6 +370,19 @@ func (m *MediaEngine) RegisterFeedback(feedback RTCPFeedback, typ RTPCodecType)
+ 	}
+ }
+ 
++func isResiliencyCodec(mimeType string) bool {
++	_, subtype, found := strings.Cut(mimeType, "/")
++	if !found {
++		subtype = mimeType
++	}
++	switch strings.ToLower(subtype) {
++	case "rtx", "red", "ulpfec", "flexfec-03":
++		return true
++	default:
++		return false
++	}
++}
++
+ // getHeaderExtensionID returns the negotiated ID for a header extension.
+ // If the Header Extension isn't enabled ok will be false.
+ func (m *MediaEngine) getHeaderExtensionID(extension RTPHeaderExtensionCapability) (
+--- a/sdp.go
++++ b/sdp.go
+@@ -572,7 +572,7 @@ func addTransceiverSDP(
+ 	for _, codec := range codecs {
+ 		name := strings.TrimPrefix(codec.MimeType, "audio/")
+ 		name = strings.TrimPrefix(name, "video/")
+-		media.WithCodec(uint8(codec.PayloadType), name, codec.ClockRate, codec.Channels, codec.SDPFmtpLine)
++		media.WithCodec(uint8(codec.PayloadType), name, codec.ClockRate, codec.Channels, "")
+ 
+ 		for _, feedback := range codec.RTPCodecCapability.RTCPFeedback {
+ 			if feedback.Parameter == "" {
+@@ -581,6 +581,10 @@ func addTransceiverSDP(
+ 				media.WithValueAttribute("rtcp-fb", fmt.Sprintf("%d %s %s", codec.PayloadType, feedback.Type, feedback.Parameter))
+ 			}
+ 		}
++
++		if codec.SDPFmtpLine != "" {
++			media.WithValueAttribute("fmtp", fmt.Sprintf("%d %s", codec.PayloadType, codec.SDPFmtpLine))
++		}
+ 	}
+ 	if len(codecs) == 0 {
+ 		// If we are sender and we have no codecs throw an error early

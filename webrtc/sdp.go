@@ -572,7 +572,7 @@ func addTransceiverSDP(
 	for _, codec := range codecs {
 		name := strings.TrimPrefix(codec.MimeType, "audio/")
 		name = strings.TrimPrefix(name, "video/")
-		media.WithCodec(uint8(codec.PayloadType), name, codec.ClockRate, codec.Channels, codec.SDPFmtpLine)
+		media.WithCodec(uint8(codec.PayloadType), name, codec.ClockRate, codec.Channels, "")
 
 		for _, feedback := range codec.RTPCodecCapability.RTCPFeedback {
 			if feedback.Parameter == "" {
@@ -580,6 +580,10 @@ func addTransceiverSDP(
 			} else {
 				media.WithValueAttribute("rtcp-fb", fmt.Sprintf("%d %s %s", codec.PayloadType, feedback.Type, feedback.Parameter))
 			}
+		}
+
+		if codec.SDPFmtpLine != "" {
+			media.WithValueAttribute("fmtp", fmt.Sprintf("%d %s", codec.PayloadType, codec.SDPFmtpLine))
 		}
 	}
 	if len(codecs) == 0 {
