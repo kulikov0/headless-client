@@ -123,12 +123,12 @@ conn, err := headless.ChromeWindows.DialQUIC(ctx, address, headless.QUICOptions{
 })
 ```
 
-`QUICOptions` has seven fields. `Transport` selects the ClientHello and is
+`QUICOptions` has eight fields. `Transport` selects the ClientHello and is
 described below. `ServerName` sets the SNI value and defaults to the host part
 of `address`. `ALPN` sets the ALPN list and defaults to `h3`.
 `InsecureSkipVerify` disables certificate verification. `EnableDatagrams`
 enables RFC 9221 datagrams. `KeepAlivePeriod` and `MaxIdleTimeout` set the
-matching QUIC timers.
+matching QUIC timers. `KeyLogWriter` receives the QUIC session keys.
 
 `QUICConfig` returns the TLS config and the QUIC config without dialing. Use it
 when the caller builds its own transport.
@@ -281,10 +281,10 @@ The tests check the values the library produces.
 - The transport tests run against a local server and check connection reuse.
 
 Every vendored patch has a guard test that fails when a regeneration loses it.
-`internal/chromehttp2` keeps its guards inside the tree, and `chromehttp2.sh`
-copies them back after each run. The guards for `internal/dtls`, `internal/ice`
-and `websocket` are in the root package, because those scripts delete every test
-file in the tree they rewrite.
+`internal/chromehttp2` and `quic` keep their guards inside the tree, and their
+scripts copy them back after each run. The guards for `internal/dtls`,
+`internal/ice`, `webrtc` and `websocket` are in the root package, because those
+scripts delete every test file in the tree they rewrite.
 
 ## Known gaps
 
@@ -293,10 +293,6 @@ The following gaps are scheduled. Gaps that will not be addressed are under
 
 ### HTTP
 
-- The QUIC Initial packet splits the ClientHello into a different number of
-  CRYPTO frames than Chrome. Chrome sends nine frames at non-sequential offsets
-  in one datagram. This library sends three. The rest of the QUIC handshake
-  matches. See [QUIC and WebTransport](#quic-and-webtransport).
 - Accept-Language is fixed to ru-RU. Chrome reads this value from a per-locale
   resource. It does not derive the value, so a table is required.
 - sec-ch-ua-platform is the only client hint value that was not read from
@@ -305,13 +301,13 @@ The following gaps are scheduled. Gaps that will not be addressed are under
 
 ### WebRTC
 
-- The SDP has pion's shape. The CNAME is derived from the stream ID, where
-  Chrome uses a random value. The codec set and payload types are pion defaults.
+- The SDP has pion's shape. The codec set and payload types are pion defaults.
   The attribute order is pion's. A server that reads the offer can detect all of
   this.
-- No STUN keepalive is sent to the STUN server. Chrome sends one every 10 s in
-  addition to the peer keepalive. Over a 170 s capture this library sent two
-  packets to its STUN servers, both during gathering, and nothing after.
+- No keepalive is sent to the STUN and TURN servers. Chrome sends one every 10 s
+  to each, in addition to the peer keepalive. Over a 301 s capture this library
+  sent four packets to its STUN server and six to its TURN server, all in two
+  gathering rounds, then nothing for the remaining 218 s.
 - RTCP feedback format and cadence have not been audited.
 - The ICE candidate priority is one number that packs the candidate type, a
   local preference and the component. pion always writes 65535 as the local
