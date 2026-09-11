@@ -41,6 +41,10 @@ func sharedKeyLog() io.Writer {
 	return keyLogWriter
 }
 
+func KeyLogWriter() io.Writer {
+	return sharedKeyLog()
+}
+
 func chromeDialer() *net.Dialer {
 	return &net.Dialer{KeepAlive: tcpKeepAliveDisabled}
 }

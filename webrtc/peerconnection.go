@@ -2321,7 +2321,7 @@ func (pc *PeerConnection) AddTransceiverFromKind(
 		if len(codecs) == 0 {
 			return nil, ErrNoCodecsAvailable
 		}
-		track, err := NewTrackLocalStaticSample(codecs[0].RTPCodecCapability, util.MathRandAlpha(16), util.MathRandAlpha(16))
+		track, err := NewTrackLocalStaticSample(codecs[0].RTPCodecCapability)
 		if err != nil {
 			return nil, err
 		}

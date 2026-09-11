@@ -17,8 +17,6 @@ func audioAndVideoOffer(t *testing.T) string {
 
 	videoTrack, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
-		"video",
-		"tunnel-video",
 	)
 	if err != nil {
 		t.Fatalf("new video track: %v", err)
@@ -29,8 +27,6 @@ func audioAndVideoOffer(t *testing.T) string {
 
 	audioTrack, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
-		"audio",
-		"tunnel-audio",
 	)
 	if err != nil {
 		t.Fatalf("new audio track: %v", err)
@@ -175,8 +171,6 @@ func TestEmittedMsidMatchesTheTrackItCameFrom(t *testing.T) {
 
 	track, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
-		"video",
-		"tunnel-video",
 	)
 	if err != nil {
 		t.Fatalf("new track: %v", err)
@@ -207,8 +201,6 @@ func videoAnswer(t *testing.T, mungeOffer func(string) string) string {
 	for _, peerConnection := range []*webrtc.PeerConnection{offerer, answerer} {
 		track, err := webrtc.NewTrackLocalStaticSample(
 			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
-			"video",
-			"tunnel-video",
 		)
 		if err != nil {
 			t.Fatalf("new track: %v", err)
