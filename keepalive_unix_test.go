@@ -27,7 +27,7 @@ func TestChromeDialerLeavesTCPKeepAliveOff(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	connection, err := chromeDialer().DialContext(ctx, "tcp", listener.Addr().String())
+	connection, err := ChromeDialer().DialContext(ctx, "tcp", listener.Addr().String())
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

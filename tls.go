@@ -49,6 +49,10 @@ func chromeDialer() *net.Dialer {
 	return &net.Dialer{KeepAlive: tcpKeepAliveDisabled}
 }
 
+func ChromeDialer() *net.Dialer {
+	return chromeDialer()
+}
+
 type TLSOptions struct {
 	DialContext        func(ctx context.Context, network, address string) (net.Conn, error)
 	ServerName         string
