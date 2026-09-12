@@ -218,6 +218,9 @@ func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 	if _, present := request.Header["User-Agent"]; !present {
 		request.Header.Set("User-Agent", t.profile.userAgent)
 	}
+	if _, present := request.Header["Sec-Fetch-Site"]; present {
+		request.Header.Set("Sec-Fetch-Site", secFetchSiteForRequest(request))
+	}
 
 	port := request.URL.Port()
 	if port == "" {
