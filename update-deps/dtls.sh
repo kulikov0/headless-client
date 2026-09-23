@@ -5,7 +5,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DST="$REPO/internal/dtls"
 UD="$REPO/update-deps"
 UPSTREAM="https://github.com/pion/dtls"
-COMMIT="16fcc8432011043c73b2cc3ae7e09f9429dd925d"
+COMMIT="733a38094d1093c55e87899956a49e727755e2ef"
 OLD="github.com/pion/dtls/v3"
 NEW="github.com/kulikov0/headless-client/internal/dtls"
 
@@ -55,7 +55,6 @@ done
 cp "$UD"/_dtls-files/*.go "$DST/"
 
 apply_patch "$DST" "$UD/dtls-default-version.patch"
-apply_patch "$DST" "$UD/dtls-dualstack-server-prime.patch"
 apply_patch "$DST" "$UD/dtls-handshake-fragment-mtu.patch"
 apply_patch "$DST" "$UD/dtls-serverhello13-hook.patch"
 

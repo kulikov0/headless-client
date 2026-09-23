@@ -49,8 +49,8 @@ Steps:
    examples, e2e, README.md, codecov.yml, and renovate.json.
 3. Rewrite github.com/pion/dtls/v3 to the internal path.
 4. Copy the files from _dtls-files.
-5. Apply dtls-default-version.patch, dtls-dualstack-server-prime.patch,
-   dtls-handshake-fragment-mtu.patch and dtls-serverhello13-hook.patch.
+5. Apply dtls-default-version.patch, dtls-handshake-fragment-mtu.patch and
+   dtls-serverhello13-hook.patch.
 6. Build internal/dtls.
 
 Changes this module makes on top of upstream are stored in update-deps as patch
@@ -235,21 +235,50 @@ versions the way a browser does. Applied by dtls.sh.
 The guard is TestVendoredDTLSOffersBothProtocolVersions in dtls_vendor_test.go.
 It runs a loopback handshake and reads supported_versions off the ClientHello.
 
-## dtls-dualstack-server-prime.patch
+## dtls-handshake-fragment-mtu.patch
 
-Changes prepareDualStackServerHandshakeStart in internal/dtls/conn.go.
+Changes prepareHandshakeRecords and fragmentHandshake in internal/dtls/conn.go.
+Applied by dtls.sh.
 
-Upstream calls primeHandshakeRecv on the dual-stack client path. The dual-stack
-server path has no such call. Without the call, the server blocks until its
-retransmit timer fires, and a handshake between two dual-stack peers fails with
-a context deadline. The patch adds the same postSetup call that upstream
-already uses for the client.
+Upstream splits a handshake message into fragments of the full MTU and then
+adds the handshake fragment header and the record header on top, so a handshake
+datagram is larger than the configured MTU. Chrome sizes the first fragment so
+that the datagram is exactly the MTU. The patch subtracts the record overhead
+and the handshake header before it splits. The record overhead is the fixed
+record header, or, for a protected DTLS 1.3 record, the unified header with the
+active connection ID plus the AEAD expansion of the cipher suite.
 
-Applied by dtls.sh. The patch is not in upstream as of pion/dtls commit 16fcc843.
+The guard is TestVendoredDTLSFillsTheHandshakeDatagramToTheMTU in
+dtls_vendor_test.go. It runs a loopback handshake against an MTU of 200 bytes
+and checks that no client datagram is over the MTU and that one datagram
+reaches it.
 
-The guard is TestVendoredDTLSCompletesADualStackHandshake in
-dtls_vendor_test.go. Without the patch the server side of that handshake ends
-in a context deadline.
+## dtls-serverhello13-hook.patch
+
+Changes flight4Generate in
+internal/dtls/internal/flight/flight13/flight4handler.go. Applied by dtls.sh.
+
+Upstream calls ServerHelloMessageHook on the DTLS 1.2 path only, through
+dtlsflight.FinalizeServerHello. That helper cannot be reused here, because
+negotiation.ValidateServerHello12Context, which it calls, rejects any response
+carrying supported_versions, key_share or pre_shared_key, which is every 1.3
+server hello. Without the patch a 1.3 server hello ships pion's extension order
+and the profile hook never runs.
+
+The patch adds finalizeServerHello13. The hook may reorder the extensions and
+nothing else: the extension types before and after the hook must match, which
+is what the Chrome order needs and all it needs. A hooked connection ID is
+checked with the upstream dtlsflight.ValidateHookedConnectionIDLength, the same
+call the 1.2 path makes. The connection ID decision is taken from the hooked
+extensions rather than the ones built before the hook, so the session records
+the connection ID that goes on the wire.
+
+The guards are in dtls_vendor_test.go.
+TestVendoredDTLSCallsTheServerHelloHookOnVersion13 checks that the hook runs on
+a 1.3 handshake, TestVendoredDTLSServerHelloCarriesTheChromeOrderOnVersion13
+checks the emitted order, and
+TestVendoredDTLSRejectsAServerHelloHookThatLeavesTheExtensionSet checks that a
+hook which drops or resizes the connection ID fails the handshake.
 
 ## ice-keepalive-interval.patch
 

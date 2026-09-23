@@ -14,7 +14,7 @@ import (
 // record protection derived from that secret.
 // Caller must not modify the secret or protection after creation.
 type TrafficGeneration struct {
-	Epoch      uint16
+	Epoch      uint64
 	Generation uint64
 	Secret     []byte // nolint:gosec
 	Protection cryptosuite.TrafficProtection
@@ -33,9 +33,9 @@ type TrafficKeyState struct {
 	mu sync.RWMutex
 
 	writeCurrent *TrafficGeneration
-	writeOld     map[uint16]*TrafficGeneration
+	writeOld     map[uint64]*TrafficGeneration
 	readCurrent  *TrafficGeneration
-	readOld      map[uint16]*TrafficGeneration
+	readOld      map[uint64]*TrafficGeneration
 }
 
 // Install any supplied current write and read generations.
@@ -49,7 +49,7 @@ func (s *TrafficKeyState) Install(write, read *TrafficGeneration) {
 }
 
 // Write returns the write generation associated with epoch.
-func (s *TrafficKeyState) Write(epoch uint16) (*TrafficGeneration, bool) {
+func (s *TrafficKeyState) Write(epoch uint64) (*TrafficGeneration, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -62,7 +62,7 @@ func (s *TrafficKeyState) Write(epoch uint16) (*TrafficGeneration, bool) {
 }
 
 // Read returns the read generation associated with epoch.
-func (s *TrafficKeyState) Read(epoch uint16) (*TrafficGeneration, bool) {
+func (s *TrafficKeyState) Read(epoch uint64) (*TrafficGeneration, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -90,36 +90,28 @@ func (s *TrafficKeyState) CurrentRead() (*TrafficGeneration, bool) {
 	return s.readCurrent, s.readCurrent != nil
 }
 
-// ReadCandidates appends installed generations matching the low epoch bits to
-// candidates. The current generation is added first if it matches.
-func (s *TrafficKeyState) ReadCandidates(
-	epochLow uint8,
-	candidates []*TrafficGeneration,
-) []*TrafficGeneration {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	const epochLowMask = uint16(0x3)
-	if s.readCurrent != nil && uint8(s.readCurrent.Epoch&epochLowMask) == epochLow {
-		candidates = append(candidates, s.readCurrent)
+// ReadCandidate selects the current or most recent past epoch with matching low bits.
+// A missing generation does not allow falling back to an older matching epoch.
+// https://www.rfc-editor.org/rfc/rfc9147.html#section-4.2.2
+func (s *TrafficKeyState) ReadCandidate(epochLow uint8, currentEpoch uint64) (*TrafficGeneration, bool) {
+	if epochLow > 3 {
+		return nil, false
+	}
+	distance := (4 + (currentEpoch & 3) - uint64(epochLow)) & 3
+	if distance > currentEpoch {
+		return nil, false
 	}
 
-	for _, generation := range s.readOld {
-		if uint8(generation.Epoch&epochLowMask) == epochLow {
-			candidates = append(candidates, generation)
-		}
-	}
-
-	return candidates
+	return s.Read(currentEpoch - distance)
 }
 
-func installTrafficGeneration(current **TrafficGeneration, old *map[uint16]*TrafficGeneration, generation *TrafficGeneration) {
+func installTrafficGeneration(current **TrafficGeneration, old *map[uint64]*TrafficGeneration, generation *TrafficGeneration) {
 	if generation == nil {
 		return
 	}
 	if previous := *current; previous != nil && previous.Epoch != generation.Epoch {
 		if *old == nil {
-			*old = make(map[uint16]*TrafficGeneration)
+			*old = make(map[uint64]*TrafficGeneration)
 		}
 		(*old)[previous.Epoch] = previous
 	}
@@ -136,11 +128,11 @@ func (s *TrafficKeyState) Clone() *TrafficKeyState {
 	return &TrafficKeyState{writeCurrent: s.writeCurrent.Clone(), writeOld: cloneTrafficGenerations(s.writeOld), readCurrent: s.readCurrent.Clone(), readOld: cloneTrafficGenerations(s.readOld)}
 }
 
-func cloneTrafficGenerations(in map[uint16]*TrafficGeneration) map[uint16]*TrafficGeneration {
+func cloneTrafficGenerations(in map[uint64]*TrafficGeneration) map[uint64]*TrafficGeneration {
 	if in == nil {
 		return nil
 	}
-	out := make(map[uint16]*TrafficGeneration, len(in))
+	out := make(map[uint64]*TrafficGeneration, len(in))
 	for epoch, generation := range in {
 		out[epoch] = generation.Clone()
 	}

@@ -4,14 +4,19 @@
 package dtls
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io"
+	"math"
 	"net"
 	"slices"
+	"sync"
 	"time"
 
 	dtlserrors "github.com/kulikov0/headless-client/internal/dtls/internal/errors"
+	dtlsnet "github.com/kulikov0/headless-client/internal/dtls/internal/net"
 	cryptosuite "github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/ciphersuite"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/crypto/elliptic"
 	"github.com/kulikov0/headless-client/internal/dtls/pkg/protocol"
@@ -63,6 +68,7 @@ type dtlsConfig struct {
 	SupportedProtocols            []string
 	EllipticCurves                []elliptic.Curve
 	InsecureSkipVerifyHello       bool
+	ReceiveCIDLength              int
 	ConnectionIDGenerator         func() []byte
 	CIDPathMigrationPolicy        cidPathMigrationPolicy
 	PaddingLengthGenerator        func(uint) uint
@@ -360,11 +366,11 @@ func WithLoggerFactory(factory logging.LoggerFactory) Option {
 	})
 }
 
-// WithMTU sets the maximum transmission unit.
-// Returns an error if the MTU is not positive.
+// WithMTU sets the size used for handshake fragmentation and record packing.
+// The default is 1200 bytes.
 func WithMTU(mtu int) Option {
 	return sharedOption(func(c *dtlsConfig) error {
-		if mtu <= 0 {
+		if mtu < minMTU || mtu > dtlsnet.MaxInboundDatagramSize {
 			return dtlserrors.ErrInvalidMTU
 		}
 		c.MTU = mtu
@@ -381,10 +387,10 @@ func WithMTU(mtu int) Option {
 //
 // This does not change the kernel socket receive buffer (SO_RCVBUF); use
 // net.UDPConn.SetReadBuffer for that.
-// Returns an error if the size is not positive.
+// Returns an error if the buffer size is not positive or greater than the 65535.
 func WithReceiveBufferSize(size int) Option {
 	return sharedOption(func(c *dtlsConfig) error {
-		if size <= 0 {
+		if size < minReceiveBufferSize || size > dtlsnet.MaxInboundDatagramSize {
 			return dtlserrors.ErrInvalidReceiveBufferSize
 		}
 		c.ReceiveBufferSize = size
@@ -484,14 +490,28 @@ const (
 )
 
 // WithConnectionID enables connection IDs and configures how authenticated
-// connection ID records may change the peer address.
+// connection ID records may change the peer address. The generator must always
+// return IDs of the same length, at most 255 bytes.
+// A zero length advertises support for sending a peer's CID without asking the
+// peer to send one in return.
 func WithConnectionID(generator func() []byte, policy cidPathMigrationPolicy) Option {
-	return sharedOption(func(c *dtlsConfig) error {
+	var generatorMu sync.Mutex
+
+	return sharedOption(func(config *dtlsConfig) error {
 		if generator == nil {
 			return dtlserrors.ErrNilConnectionIDGenerator
 		}
-		c.ConnectionIDGenerator = generator
-		c.CIDPathMigrationPolicy = policy
+		config.ConnectionIDGenerator = func() []byte {
+			generatorMu.Lock()
+			defer generatorMu.Unlock()
+
+			return bytes.Clone(generator())
+		}
+		config.ReceiveCIDLength = len(config.ConnectionIDGenerator())
+		if config.ReceiveCIDLength > math.MaxUint8 {
+			return fmt.Errorf("%w: generator returned %d bytes, maximum is %d", dtlserrors.ErrInvalidConnectionIDLength, config.ReceiveCIDLength, math.MaxUint8)
+		}
+		config.CIDPathMigrationPolicy = policy
 
 		return nil
 	})
