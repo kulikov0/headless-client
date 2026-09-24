@@ -57,7 +57,9 @@ func (p Profile) Headers(dest RequestDest) http.Header {
 	header := http.Header{}
 	header.Set("User-Agent", p.userAgent)
 	header.Set("Accept-Language", p.acceptLanguage)
-	if dest != DestWebSocket {
+	if dest != DestWebSocket && p.clientHintBrands != "" {
+		// Safari profiles leave client hints empty — real Safari sends no
+		// sec-ch-ua headers, and an empty-valued header would be a tell.
 		header.Set("sec-ch-ua", p.clientHintBrands)
 		header.Set("sec-ch-ua-mobile", p.clientHintMobile)
 		header.Set("sec-ch-ua-platform", p.clientHintPlatform)
