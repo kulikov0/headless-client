@@ -15,8 +15,8 @@ internal/chromehttp1 is not vendored. Edit it directly. See
 - internal/dtls: a fork of github.com/pion/dtls/v3 with DTLS 1.3.
 - internal/ice: github.com/pion/ice/v4 with the keepalive interval patch.
 - webrtc: github.com/pion/webrtc/v4 with its dtls and ice imports pointed at
-  internal/dtls and internal/ice, and the RTP header extension patch. It is at
-  the top level because consumers import it.
+  internal/dtls and internal/ice, and the RTP header extension and SDP patches.
+  It is at the top level because consumers import it.
 - internal/chromehttp2: the http2, internal/httpcommon, and internal/httpsfv
   packages of golang.org/x/net, with the HTTP/2 fingerprint patch.
 - websocket: github.com/gorilla/websocket with the Chrome handshake patch. It is
@@ -94,8 +94,9 @@ Steps:
 3. Rewrite github.com/pion/webrtc/v4 to the webrtc path,
    github.com/pion/dtls/v3 to internal/dtls, and github.com/pion/ice/v4 to
    internal/ice.
-4. Apply webrtc-header-extension-order.patch.
-5. Build webrtc.
+4. Run gofmt.
+5. Apply the webrtc-*.patch files in the order listed in the script.
+6. Build webrtc.
 
 ## chromehttp2.sh
 
@@ -124,17 +125,14 @@ Steps:
 
 1. Download github.com/sardanioss/quic-go and copy it to quic. Copy
    github.com/sardanioss/qpack to quic/qpack. Non-test files only.
-2. Remove .git at any depth, .github, go.mod, go.sum, assets, example, interop,
-   fuzzing, integrationtests, testutils, metrics, tools, internal/mocks,
-   mockgen.go, README.md, SECURITY.md, codecov.yml and oss-fuzz.sh.
+2. Remove upstream tooling, tests and mocks. The full list is in the script.
 3. Rewrite github.com/sardanioss/quic-go to the quic path,
    github.com/sardanioss/qpack to quic/qpack, github.com/sardanioss/utls to
    github.com/refraction-networking/utls, and github.com/sardanioss/http to
    net/http. The two header-order keys of that http fork become local constants.
 4. Copy the files from _chromequic-files.
-5. Apply chromequic-refraction-utls.patch and
-   chromequic-preset-transport-params.patch.
-6. Build quic.
+5. Apply the chromequic-*.patch files in the order listed in the script.
+6. Build quic. The script does not test, run `go test ./quic/...` after it.
 
 The qpack fork is copied rather than replaced with github.com/quic-go/qpack
 because it adds a Sensitive field to HeaderField and the never-index encoding
@@ -212,6 +210,23 @@ Without the patch the handshake still completes against some servers, but JA4
 reports the connection as t rather than q, because the transport parameters
 extension is empty. That difference only shows on the wire, so the check is a
 stand capture rather than a unit test.
+
+## chromequic-chaos-protection.patch
+
+Replaces the fork's ChromeStyleInitialPackets with Chrome's chaos protector:
+client Initial CRYPTO frames are split, reordered and mixed with PING and
+PADDING. Guards in quic/chaos_protector_test.go.
+
+## chromequic-http3-settings.patch
+
+Writes SETTINGS in ascending identifier order with one GREASE setting, and
+skips PRIORITY_UPDATE on extended CONNECT. Guards in
+quic/http3/http3_settings_test.go.
+
+## chromequic-webtransport-connect.patch
+
+Lets a nil User-Agent suppress the default one, as Chrome's WebTransport
+CONNECT carries none. Guards in quic/http3/webtransport_connect_test.go.
 
 ## websocket-chrome-handshake.patch
 
@@ -330,14 +345,75 @@ both media sections against a browser capture. Removing the sort call changes
 the order of the video section. Reversing the direction of the picker scan gives
 toffset the identifier 5 instead of 14.
 
+## webrtc-answer-codec-order.patch
+
+Emits answer codecs in the offer's payload type order. Guard:
+TestAnswerKeepsThePayloadTypeOrderOfTheOffer.
+
+## webrtc-rtcp-cname.patch
+
+Uses one random 16 character cname per peer connection instead of the stream
+ID. Guard: TestCnameIsOnePerPeerConnection.
+
+## webrtc-msid-track-identity.patch
+
+Gives local tracks a UUIDv4 track ID and the stream ID `-`. Guard:
+TestMediaLevelMsidHasTheChromeShape.
+
+## webrtc-ssrc-attributes.patch
+
+Emits only `cname` and `msid` on a=ssrc lines, no `mslabel` or `label`. Guard:
+TestSsrcCarriesOnlyCnameAndMsid.
+
+## webrtc-msid-semantic.patch
+
+Writes `a=msid-semantic: WMS` instead of `WMS *`. Guard:
+TestMsidSemanticHasTheChromeShape.
+
+## webrtc-answer-msid-signaling.patch
+
+Answers with the msid form the offer used: a=ssrc msid only for a Plan B
+offer, media level a=msid otherwise. Guard:
+TestAnswerDropsTheSsrcMsidWhenTheOfferCarriedBothForms.
+
+## webrtc-track-constructor-args.patch
+
+Removes the id and streamID arguments from NewTrackLocalStaticRTP and
+NewTrackLocalStaticSample, since the identity patch ignores them. This changes
+the public API.
+
+## webrtc-session-origin.patch
+
+Sets the o= session version to 2 and the address to 127.0.0.1, as Chrome does.
+Guard: TestVendoredWebRTCSeedsTheSessionOriginLikeChrome.
+
+## webrtc-codec-feedback.patch
+
+Gives transport-cc to Opus and to video codecs in Chrome's order, and writes
+a=fmtp after a=rtcp-fb. Guards in sdpcodec_vendor_test.go.
+
+## webrtc-answer-feedback-order.patch
+
+Answers with the local feedback list filtered by the offer. Guard:
+TestVendoredWebRTCAnswersWithTheLocalFeedbackOrder.
+
+## webrtc-attribute-order.patch
+
+Reorders session and media attributes by the tables in internal/sdporder, and
+adds Chrome's a=rtcp and a=ice-options lines. Guards in
+sdpsectionorder_vendor_test.go.
+
 ## _chromequic-files
 
-header_order_keys.go and tls_state.go, copied into quic/http3 by chromequic.sh.
+Copied into quic by chromequic.sh.
 
-header_order_keys.go declares the two header-order keys that the
-github.com/sardanioss/http fork exports and net/http does not.
-
-tls_state.go converts between the two ConnectionState types.
+- header_order_keys.go: the two header-order keys that the
+  github.com/sardanioss/http fork exports and net/http does not.
+- tls_state.go: converts between the two ConnectionState types.
+- chaos_protector.go: the frame scattering called by
+  chromequic-chaos-protection.patch.
+- chaos_protector_test.go, http3_settings_test.go,
+  webtransport_connect_test.go: guards for the matching patches.
 
 The underscore prefix stops the go tool from building the directory.
 

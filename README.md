@@ -53,12 +53,19 @@ The package is named `headless`.
 - Headers: user agent, client hints, Accept, Accept-Encoding, Sec-Fetch-*.
 - WebSocket: the Chrome upgrade handshake.
 - QUIC: the two ClientHellos Chrome produces, transport parameters in Chrome's
-  shuffled order with one GREASE, and Chrome's Initial datagram size.
+  shuffled order with one GREASE, Chrome's Initial datagram size, and Initial
+  CRYPTO frames scattered the way Chrome's chaos protector does.
+- HTTP/3 and WebTransport: Chrome's control stream and QPACK streams, and the
+  WebTransport CONNECT header block.
 - WebRTC: DTLS ClientHello extension shuffling, optional DTLS 1.3 mimicry,
   ServerHello extension order on both DTLS versions, no HelloVerifyRequest,
   handshake fragments sized so the datagram fills the MTU, SRTP profile order,
   RTP header extension set, identifiers and order, ICE credential shape, ICE
   keepalive interval.
+- SDP: Chrome's session origin, attribute order at the session and the media
+  level, one `a=fingerprint` per media section, cname and msid identity
+  strings, RTCP feedback set and order per codec, and answers in the offer's
+  payload type order.
 - TCP: keepalive disabled, as in Chrome.
 
 ## Usage
@@ -102,6 +109,19 @@ disables certificate verification.
 `HTTPClient` takes no options because it keys its shared transport on the
 profile value, and a function field cannot be part of a map key. Use `Transport`
 when options are needed.
+
+A custom `DialContext` replaces the dialer that disables the TCP keepalive.
+`ChromeDialer` returns that dialer, so a proxy dialer can build on it and keep
+the Chrome TCP behavior.
+
+```go
+transport := headless.ChromeWindows.Transport(headless.TLSOptions{
+	DialContext: headless.ChromeDialer().DialContext,
+})
+```
+
+The transport sets Chrome's user agent on a request that has no `User-Agent`
+header.
 
 ### WebSocket
 
@@ -151,6 +171,15 @@ version in `measuredChromeMajorVersion`. That default changed between the
 BoringSSL revisions pinned by Chromium 151 and 153. When you change
 `measuredChromeMajorVersion`, read `ssl/ssl_key_share.cc` at the pinned
 revision and update `boringSSLMLKEMDefaultChromeMajorVersion`.
+
+`WebTransportConnectHeader` returns the header block for the extended CONNECT
+request that opens a WebTransport session. It carries Chrome's pseudo-header
+order, `sec-webtransport-http3-draft02` and `origin`, and no user agent, as in
+Chrome.
+
+```go
+header := headless.ChromeWindows.WebTransportConnectHeader("https://example.com")
+```
 
 ### WebRTC
 
@@ -228,6 +257,9 @@ connection pool.
 If `SSLKEYLOGFILE` is set, the library appends TLS session keys to that file, so
 Wireshark can decrypt the capture. The file is opened once per process.
 
+`KeyLogWriter` returns that file, or nil when the variable is unset. Pass it to
+`QUICOptions.KeyLogWriter` to log QUIC keys to the same file.
+
 ## Method
 
 Values come from Chromium and libwebrtc source. Packet captures verify them.
@@ -301,14 +333,15 @@ The following gaps are scheduled. Gaps that will not be addressed are under
 
 ### WebRTC
 
-- The SDP has pion's shape. The codec set and payload types are pion defaults.
-  The attribute order is pion's. A server that reads the offer can detect all of
-  this.
+- The codec set and payload types in the SDP are pion defaults. A server that
+  reads the offer can detect them. The attribute order, identity strings and
+  RTCP feedback lines already match Chrome.
 - No keepalive is sent to the STUN and TURN servers. Chrome sends one every 10 s
   to each, in addition to the peer keepalive. Over a 301 s capture this library
   sent four packets to its STUN server and six to its TURN server, all in two
   gathering rounds, then nothing for the remaining 218 s.
-- RTCP feedback format and cadence have not been audited.
+- The RTCP packet format and cadence on the wire have not been audited. The
+  feedback types negotiated in the SDP match Chrome.
 - The ICE candidate priority is one number that packs the candidate type, a
   local preference and the component. pion always writes 65535 as the local
   preference, so a host candidate gets 2130706431 where the reference capture
