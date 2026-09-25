@@ -58,10 +58,10 @@ func TestEncodeHeadersPutsPriorityLast(t *testing.T) {
 		Method: "GET",
 		Host:   "api.example.com",
 		Header: map[string][]string{
-			"User-Agent":                {"x"},
-			"Accept":                    {"*/*"},
-			"Priority":                  {"u=1, i"},
-			"X-Telemost-Client-Version": {"1.2.3"},
+			"User-Agent":        {"x"},
+			"Accept":            {"*/*"},
+			"Priority":          {"u=1, i"},
+			"X-Goog-Api-Client": {"1.2.3"},
 		},
 	})
 
@@ -157,12 +157,12 @@ func TestOrderedHeaderKeysLeadsWithTheHintsOnNavigations(t *testing.T) {
 
 func TestOrderedHeaderKeysKeepsPriorityAfterAppHeaders(t *testing.T) {
 	header := map[string][]string{
-		"User-Agent":                {"x"},
-		"Accept":                    {"*/*"},
-		"Cookie":                    {"a=1"},
-		"Priority":                  {"u=1, i"},
-		"Client-Instance-Id":        {"abc"},
-		"X-Telemost-Client-Version": {"1.2.3"},
+		"User-Agent":         {"x"},
+		"Accept":             {"*/*"},
+		"Cookie":             {"a=1"},
+		"Priority":           {"u=1, i"},
+		"Client-Instance-Id": {"abc"},
+		"X-Goog-Api-Client":  {"1.2.3"},
 	}
 	got := orderedHeaderKeys(header)
 	want := []string{
@@ -170,7 +170,7 @@ func TestOrderedHeaderKeysKeepsPriorityAfterAppHeaders(t *testing.T) {
 		"Accept",
 		"Cookie",
 		"Client-Instance-Id",
-		"X-Telemost-Client-Version",
+		"X-Goog-Api-Client",
 		"Priority",
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
