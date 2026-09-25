@@ -23,6 +23,12 @@ var networkSchemeDefaultPorts = map[string]string{
 	"ftp":   "21",
 }
 
+var secFetchSiteDistance = map[string]int{
+	secFetchSiteSameOrigin: 0,
+	secFetchSiteSameSite:   1,
+	secFetchSiteCrossSite:  2,
+}
+
 func SecFetchSite(initiator, target string) string {
 	if initiator == "" {
 		return secFetchSiteNone
@@ -99,13 +105,34 @@ func secFetchSiteForRequest(request *http.Request) string {
 		return secFetchSiteCrossSite
 	}
 
-	initiator := request.Header.Get("Origin")
+	redirectChain := []*http.Request{request}
+	for redirect := request.Response; redirect != nil && redirect.Request != nil; redirect = redirect.Request.Response {
+		redirectChain = append(redirectChain, redirect.Request)
+	}
+	initiator := requestInitiator(redirectChain[len(redirectChain)-1])
 	if initiator == "" {
-		referer, err := url.Parse(request.Header.Get("Referer"))
-		if err == nil && hasNetworkHost(referer) {
-			initiator = referer.Scheme + "://" + referer.Host
+		return secFetchSiteNone
+	}
+
+	worstSite := secFetchSiteSameOrigin
+	for _, hop := range redirectChain {
+		site := SecFetchSite(initiator, hop.URL.String())
+		if secFetchSiteDistance[site] > secFetchSiteDistance[worstSite] {
+			worstSite = site
 		}
 	}
 
-	return SecFetchSite(initiator, request.URL.String())
+	return worstSite
+}
+
+func requestInitiator(request *http.Request) string {
+	if origin := request.Header.Get("Origin"); origin != "" {
+		return origin
+	}
+	referer, err := url.Parse(request.Header.Get("Referer"))
+	if err == nil && hasNetworkHost(referer) {
+		return referer.Scheme + "://" + referer.Host
+	}
+
+	return ""
 }
