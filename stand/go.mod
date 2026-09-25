@@ -5,6 +5,8 @@ go 1.26.1
 require (
 	github.com/gopacket/gopacket v1.4.0
 	github.com/kulikov0/headless-client v0.0.0-00010101000000-000000000000
+	golang.org/x/crypto v0.51.0
+	golang.org/x/net v0.55.0
 )
 
 require (
@@ -27,8 +29,6 @@ require (
 	github.com/pion/turn/v4 v4.1.4 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
-	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
