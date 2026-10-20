@@ -464,3 +464,46 @@ func TestTheCallerUserAgentSurvivesTheRoundTripper(t *testing.T) {
 		}
 	}
 }
+
+// TestChrome152CarriesTheUnregisteredExtension pins the 0xCA34 extension:
+// Chrome 152 sends it next to the ECH GREASE pair, and the JA4 hashes the
+// extension IDs, so a hello without it reads as a different browser.
+func TestChrome152CarriesTheUnregisteredExtension(t *testing.T) {
+	spec, err := ChromeWindows.WithClientHelloID(utls.HelloChrome_133).clientHelloSpec(nil, false)
+	if err != nil {
+		t.Fatalf("clientHelloSpec: %v", err)
+	}
+	var found bool
+	for _, extension := range spec.Extensions {
+		generic, ok := extension.(*utls.GenericExtension)
+		if !ok || generic.Id != 0xCA34 {
+			continue
+		}
+		found = true
+		if len(generic.Data) == 0 {
+			t.Fatal("the 0xCA34 extension carries no payload")
+		}
+	}
+	if !found {
+		t.Fatal("the chrome 152 parrot carries no 0xCA34 extension")
+	}
+}
+
+// TestOtherParrotsKeepTheirOwnExtensions checks that the unregistered
+// extension does not leak into the other browsers' hellos.
+func TestOtherParrotsKeepTheirOwnExtensions(t *testing.T) {
+	for name, profile := range map[string]Profile{
+		"firefox": ChromeWindows.WithClientHelloID(utls.HelloFirefox_120),
+		"safari":  ChromeWindows.WithClientHelloID(utls.HelloSafari_16_0),
+	} {
+		spec, err := profile.clientHelloSpec(nil, false)
+		if err != nil {
+			t.Fatalf("%s: clientHelloSpec: %v", name, err)
+		}
+		for _, extension := range spec.Extensions {
+			if generic, ok := extension.(*utls.GenericExtension); ok && generic.Id == 0xCA34 {
+				t.Fatalf("the %s parrot carries the chrome 0xCA34 extension", name)
+			}
+		}
+	}
+}
