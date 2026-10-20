@@ -107,6 +107,14 @@ list, the extension list, `supported_versions`, `supported_groups`, and
 `key_share`. The tool removes them before comparing. Without this, two captures
 from the same browser would report differences.
 
+### HTTP
+
+With `<role>.keys` next to the pcap, the tool decrypts TLS 1.3 and TLS 1.2 AEAD
+connections and compares the first request of each target: Akamai fingerprint,
+SETTINGS, WINDOW_UPDATE, PRIORITY frames, HEADERS priority, pseudo-header and
+header order, and every header value except `cookie`. The summary counts the
+connections it could not decrypt and why.
+
 ## Stop the stand
 
 ```

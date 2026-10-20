@@ -31,9 +31,9 @@ func TestRequestDestSecFetchSiteMatchesTheRoutesWeUse(t *testing.T) {
 		target    string
 		want      string
 	}{
-		{DestDocument, "", "https://telemost.yandex.ru/", "none"},
-		{DestScript, "https://telemost.yandex.ru/", "https://telemost.yastatic.net/s3/telemost/_/main.js", "cross-site"},
-		{DestEmpty, "https://telemost.yandex.ru", "https://cloud-api.yandex.ru/telemost_front/v2/telemost", "same-site"},
+		{DestDocument, "", "https://www.google.com/", "none"},
+		{DestScript, "https://www.google.com/", "https://www.gstatic.com/og/_/js/app.js", "cross-site"},
+		{DestEmpty, "https://www.google.com", "https://apis.google.com/v1/discovery", "same-site"},
 	}
 
 	for _, route := range routes {

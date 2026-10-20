@@ -28,7 +28,11 @@ rm -rf "$DST/.git" "$DST/.github" "$DST/go.mod" "$DST/go.sum"
 find "$DST" -type d -name '.git' -exec rm -rf {} + 2>/dev/null || true
 find "$DST" -name '*_test.go' -delete
 find "$DST" -type d \( -name testdata -o -name examples -o -name e2e \) -exec rm -rf {} + 2>/dev/null || true
-rm -f "$DST/README.md" "$DST/codecov.yml" "$DST/renovate.json"
+rm -rf "$DST/test-wasm"
+rm -f "$DST/codecov.yml" "$DST/renovate.json" "$DST/.gitignore" "$DST/.golangci.yml" \
+  "$DST/.goreleaser.yml" "$DST/.editorconfig" "$DST/.codacy.yaml" "$DST/.eslintrc.json" \
+  "$DST/package.json" "$DST/yarn.lock" "$DST/DESIGN.md"
+find "$DST" -name 'README.md' -delete
 
 grep -rl "$OLD_WEBRTC\|$OLD_DTLS\|$OLD_ICE" "$DST" --include='*.go' | while read -r f; do
   perl -pi -e "s#\\Q$OLD_WEBRTC\\E#$NEW_WEBRTC#g; s#\\Q$OLD_DTLS\\E#$NEW_DTLS#g; s#\\Q$OLD_ICE\\E#$NEW_ICE#g" "$f"
@@ -42,6 +46,17 @@ fi
 gofmt -w "$DST"
 
 apply_patch "$DST" "$UD/webrtc-header-extension-order.patch"
+apply_patch "$DST" "$UD/webrtc-answer-codec-order.patch"
+apply_patch "$DST" "$UD/webrtc-rtcp-cname.patch"
+apply_patch "$DST" "$UD/webrtc-msid-track-identity.patch"
+apply_patch "$DST" "$UD/webrtc-ssrc-attributes.patch"
+apply_patch "$DST" "$UD/webrtc-msid-semantic.patch"
+apply_patch "$DST" "$UD/webrtc-answer-msid-signaling.patch"
+apply_patch "$DST" "$UD/webrtc-track-constructor-args.patch"
+apply_patch "$DST" "$UD/webrtc-session-origin.patch"
+apply_patch "$DST" "$UD/webrtc-codec-feedback.patch"
+apply_patch "$DST" "$UD/webrtc-answer-feedback-order.patch"
+apply_patch "$DST" "$UD/webrtc-attribute-order.patch"
 
 go -C "$REPO" build ./webrtc/...
 echo "webrtc regenerated from $OLD_WEBRTC@$VERSION"

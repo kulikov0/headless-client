@@ -215,12 +215,16 @@ func flight4Generate( //nolint:cyclop
 	if cfg.ConnectionIDGenerator != nil && offer.Offered(extension.TypeConnectionID) {
 		localCID := state.LocalConnectionID()
 		if !state.CID.Negotiated {
-			localCID = bytes.Clone(cfg.ConnectionIDGenerator())
+			localCID, err = cfg.GenerateConnectionID()
+			if err != nil {
+				return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
+			}
+			localCID = bytes.Clone(localCID)
 		}
 		serverHelloExtensions = dtlsflight.AppendConnectionIDExtensions(serverHelloExtensions, localCID, cfg.EnableRRC && offer.Offered(extension.TypeReturnRoutabilityCheck))
 	}
 	serverHelloMessage := &handshake.MessageServerHello{Version: protocol.Version1_2, Random: state.LocalRandom, CipherSuiteID: &cipherSuiteID, CompressionMethod: dtlsflight.DefaultCompressionMethods()[0], Extensions: serverHelloExtensions}
-	serverHelloMessage, err = hookedServerHello(serverHelloMessage, cfg.ServerHelloMessageHook)
+	serverHelloMessage, err = finalizeServerHello13(serverHelloMessage, cfg)
 	if err != nil {
 		return nil, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, err
 	}
@@ -281,26 +285,41 @@ func flight4Generate( //nolint:cyclop
 	return pkts, nil, nil
 }
 
-func hookedServerHello(
+// finalizeServerHello13 applies the server hello hook on the DTLS 1.3 path.
+// Upstream applies the hook on the 1.2 path only, through
+// dtlsflight.FinalizeServerHello, which rejects a 1.3 server hello because
+// negotiation.ValidateServerHello12Context reads supported_versions as a
+// message that is not a 1.2 server hello.
+//
+// The hook may reorder the extensions and nothing else. Reordering is the only
+// reason this module hooks the message, and an extension the hook adds or
+// drops would change a negotiation the hook cannot see.
+func finalizeServerHello13(
 	base *handshake.MessageServerHello,
-	hook func(handshake.MessageServerHello) handshake.Message,
+	cfg *dtlsconfig.HandshakeConfig,
 ) (*handshake.MessageServerHello, error) {
-	if hook == nil {
+	if cfg.ServerHelloMessageHook == nil {
 		return base, nil
 	}
-	hooked, ok := hook(*base).(*handshake.MessageServerHello)
-	if !ok || len(hooked.Extensions) != len(base.Extensions) {
+	hooked, ok := cfg.ServerHelloMessageHook(*base).(*handshake.MessageServerHello)
+	if !ok || !slices.Equal(extensionTypes(base.Extensions), extensionTypes(hooked.Extensions)) {
 		return nil, dtlserrors.ErrInvalidServerHello
 	}
-	for _, value := range base.Extensions {
-		extensionType := value.ExtensionType()
-		carried := slices.ContainsFunc(hooked.Extensions, func(candidate extension.Value) bool {
-			return candidate.ExtensionType() == extensionType
-		})
-		if !carried {
-			return nil, dtlserrors.ErrInvalidServerHello
-		}
+	if err := dtlsflight.ValidateHookedConnectionIDLength(hooked.Extensions, cfg, true); err != nil {
+		return nil, err
 	}
 
 	return hooked, nil
+}
+
+// extensionTypes returns the extension types in ascending order, so two sets
+// compare equal whatever order the hook left them in.
+func extensionTypes(values []extension.Value) []extension.Type {
+	types := make([]extension.Type, 0, len(values))
+	for _, value := range values {
+		types = append(types, value.ExtensionType())
+	}
+	slices.Sort(types)
+
+	return types
 }

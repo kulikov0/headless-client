@@ -26,7 +26,12 @@ import (
 	"github.com/pion/logging"
 )
 
-const defaultMTU = 1200 // bytes
+const (
+	minMTU     = 1
+	defaultMTU = 1200 // bytes
+
+	minReceiveBufferSize = 1
+)
 
 var defaultCurves = []elliptic.Curve{ //nolint:gochecknoglobals
 	elliptic.X25519MLKEM768,
@@ -154,6 +159,26 @@ func filterFIPSCurves(curves []elliptic.Curve) []elliptic.Curve {
 	return filtered
 }
 
+// cipherSuiteFIPSApproved reports whether a suite's cipher comes from the Go FIPS
+// module. ChaCha20-Poly1305 and AES-CCM don't, so they're not approved in FIPS
+// mode; AES-GCM and AES-CBC are fine.
+func cipherSuiteFIPSApproved(id cryptosuite.ID) bool {
+	switch id {
+	case cryptosuite.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+		cryptosuite.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+		cryptosuite.TLS_PSK_WITH_CHACHA20_POLY1305_SHA256,
+		cryptosuite.TLS_CHACHA20_POLY1305_SHA256,
+		cryptosuite.TLS_ECDHE_ECDSA_WITH_AES_128_CCM,
+		cryptosuite.TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8,
+		cryptosuite.TLS_PSK_WITH_AES_128_CCM,
+		cryptosuite.TLS_PSK_WITH_AES_128_CCM_8,
+		cryptosuite.TLS_PSK_WITH_AES_256_CCM_8:
+		return false
+	default:
+		return true
+	}
+}
+
 func adaptVerifyConnection(verifyConnection func(*State) error) func(dtlsstate.Active) error {
 	if verifyConnection == nil {
 		return nil
@@ -219,6 +244,7 @@ func newHandshakeConfig(config *dtlsConfig, configValues connConfigValues, resum
 		DisableRetransmitBackoff:      config.DisableRetransmitBackoff,
 		EllipticCurves:                configValues.ellipticCurves,
 		InsecureSkipHelloVerify:       config.InsecureSkipVerifyHello,
+		ReceiveCIDLength:              config.ReceiveCIDLength,
 		ConnectionIDGenerator:         config.ConnectionIDGenerator,
 		EnableRRC:                     config.CIDPathMigrationPolicy == CIDPathMigrationRRC,
 		HelloRandomBytesGenerator:     config.HelloRandomBytesGenerator,
@@ -402,6 +428,14 @@ func selectCipherSuites(selectedIDs []cryptosuite.ID, customCipherSuites func() 
 	cipherSuites = slices.DeleteFunc(cipherSuites, func(suite cryptosuite.Suite) bool {
 		return !slices.ContainsFunc(versions, suite.Capabilities().SupportsVersion)
 	})
+
+	// Drop ciphers the Go FIPS module can't provide when FIPS mode is on,
+	// mirroring effectiveEllipticCurves/filterFIPSCurves above.
+	if fips140.Enabled() {
+		cipherSuites = slices.DeleteFunc(cipherSuites, func(suite cryptosuite.Suite) bool {
+			return !cipherSuiteFIPSApproved(suite.ID())
+		})
+	}
 
 	var foundCertificateSuite, foundPSKSuite, foundTrafficSuite bool
 	i := 0

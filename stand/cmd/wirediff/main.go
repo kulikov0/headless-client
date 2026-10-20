@@ -97,9 +97,12 @@ func main() {
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	grouped := make([]map[string]*group, len(roles))
+	sessions := make([]map[string]*sessionGroup, len(roles))
 	for i, role := range roles {
 		grouped[i] = groupHellos(role, *sni, *clientOnly)
+		sessions[i] = groupSessions(role, *sni)
 		summarize(writer, role, grouped[i])
+		summarizeSessions(writer, role, sessions[i])
 	}
 	writer.Flush()
 
@@ -110,27 +113,41 @@ func main() {
 	if *targetA != "" || *targetB != "" {
 		left := selectGroup(grouped[0], *targetA)
 		right := selectGroup(grouped[1], *targetB)
-		if left == nil {
-			fail("%s has no target matching %q", roles[0].name, *targetA)
+		leftSessions := selectSessionGroup(sessions[0], *targetA)
+		rightSessions := selectSessionGroup(sessions[1], *targetB)
+		if (left == nil || right == nil) && (leftSessions == nil || rightSessions == nil) {
+			fail("no target matches -a %q in %s and -b %q in %s", *targetA, roles[0].name, *targetB, roles[1].name)
 		}
-		if right == nil {
-			fail("%s has no target matching %q", roles[1].name, *targetB)
+		if left != nil && right != nil {
+			fmt.Printf("\ndiff %s %s %s <-> %s %s %s\n",
+				roles[0].name, left.transport, left.target, roles[1].name, right.transport, right.target)
+			diff(writer, left, right)
+			writer.Flush()
 		}
-		fmt.Printf("\ndiff %s %s %s <-> %s %s %s\n",
-			roles[0].name, left.transport, left.target, roles[1].name, right.transport, right.target)
-		diff(writer, left, right)
-		writer.Flush()
+		if leftSessions != nil && rightSessions != nil {
+			fmt.Printf("\ndiff %s %s %s <-> %s %s %s\n",
+				roles[0].name, leftSessions.protocol, leftSessions.target,
+				roles[1].name, rightSessions.protocol, rightSessions.target)
+			diffSessions(writer, leftSessions, rightSessions)
+			writer.Flush()
+		}
 		return
 	}
 
 	shared := commonTargets(grouped[0], grouped[1])
-	if len(shared) == 0 {
+	sharedSessions := commonTargets(sessions[0], sessions[1])
+	if len(shared) == 0 && len(sharedSessions) == 0 {
 		fmt.Printf("\nno target reached by both roles, pick them with -a and -b\n")
 		return
 	}
 	for _, target := range shared {
 		fmt.Printf("\ndiff %s <-> %s   %s\n", roles[0].name, roles[1].name, target)
 		diff(writer, grouped[0][target], grouped[1][target])
+		writer.Flush()
+	}
+	for _, target := range sharedSessions {
+		fmt.Printf("\ndiff %s <-> %s   %s\n", roles[0].name, roles[1].name, target)
+		diffSessions(writer, sessions[0][target], sessions[1][target])
 		writer.Flush()
 	}
 }
@@ -248,7 +265,7 @@ func report(writer *tabwriter.Writer, field, left, right string) {
 	fmt.Fprintf(writer, "  \t\t%s\n", right)
 }
 
-func commonTargets(left, right map[string]*group) []string {
+func commonTargets[Group any](left, right map[string]Group) []string {
 	var shared []string
 	for _, key := range sortedKeys(left) {
 		if _, ok := right[key]; ok {
@@ -259,7 +276,7 @@ func commonTargets(left, right map[string]*group) []string {
 	return shared
 }
 
-func sortedKeys(groups map[string]*group) []string {
+func sortedKeys[Group any](groups map[string]Group) []string {
 	keys := make([]string, 0, len(groups))
 	for key := range groups {
 		keys = append(keys, key)

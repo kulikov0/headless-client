@@ -4,7 +4,7 @@ Scripts that regenerate the vendored packages in this module. A vendored
 package is a copy of a third-party module with its import paths rewritten to a
 path inside this module.
 
-Do not edit internal/dtls, internal/ice, internal/chromehttp2, webrtc, or
+Do not edit internal/dtls, internal/ice, internal/chromehttp2, quic, webrtc, or
 websocket by hand. Run the scripts.
 
 internal/chromehttp1 is not vendored. Edit it directly. See
@@ -15,12 +15,15 @@ internal/chromehttp1 is not vendored. Edit it directly. See
 - internal/dtls: a fork of github.com/pion/dtls/v3 with DTLS 1.3.
 - internal/ice: github.com/pion/ice/v4 with the keepalive interval patch.
 - webrtc: github.com/pion/webrtc/v4 with its dtls and ice imports pointed at
-  internal/dtls and internal/ice, and the RTP header extension patch. It is at
-  the top level because consumers import it.
+  internal/dtls and internal/ice, and the RTP header extension and SDP patches.
+  It is at the top level because consumers import it.
 - internal/chromehttp2: the http2, internal/httpcommon, and internal/httpsfv
   packages of golang.org/x/net, with the HTTP/2 fingerprint patch.
 - websocket: github.com/gorilla/websocket with the Chrome handshake patch. It is
   at the top level because consumers import it.
+- quic: github.com/sardanioss/quic-go and github.com/sardanioss/qpack, pointed at
+  refraction-networking/utls and net/http. It is at the top level because
+  consumers import quic, http3 and quicvarint directly.
 
 ## dtls.sh
 
@@ -46,8 +49,8 @@ Steps:
    examples, e2e, README.md, codecov.yml, and renovate.json.
 3. Rewrite github.com/pion/dtls/v3 to the internal path.
 4. Copy the files from _dtls-files.
-5. Apply dtls-default-version.patch, dtls-dualstack-server-prime.patch,
-   dtls-handshake-fragment-mtu.patch and dtls-serverhello13-hook.patch.
+5. Apply dtls-default-version.patch, dtls-handshake-fragment-mtu.patch and
+   dtls-serverhello13-hook.patch.
 6. Build internal/dtls.
 
 Changes this module makes on top of upstream are stored in update-deps as patch
@@ -91,8 +94,9 @@ Steps:
 3. Rewrite github.com/pion/webrtc/v4 to the webrtc path,
    github.com/pion/dtls/v3 to internal/dtls, and github.com/pion/ice/v4 to
    internal/ice.
-4. Apply webrtc-header-extension-order.patch.
-5. Build webrtc.
+4. Run gofmt.
+5. Apply the webrtc-*.patch files in the order listed in the script.
+6. Build webrtc.
 
 ## chromehttp2.sh
 
@@ -110,6 +114,36 @@ Steps:
 5. Apply chromehttp2-fingerprint.patch.
 6. Copy the tests from _chromehttp2-tests.
 7. Build and test internal/chromehttp2.
+
+## chromequic.sh
+
+    ./update-deps/chromequic.sh [version] [qpack-version]
+
+Default versions: v1.2.28 and v0.6.3.
+
+Steps:
+
+1. Download github.com/sardanioss/quic-go and copy it to quic. Copy
+   github.com/sardanioss/qpack to quic/qpack. Non-test files only.
+2. Remove upstream tooling, tests and mocks. The full list is in the script.
+3. Rewrite github.com/sardanioss/quic-go to the quic path,
+   github.com/sardanioss/qpack to quic/qpack, github.com/sardanioss/utls to
+   github.com/refraction-networking/utls, and github.com/sardanioss/http to
+   net/http. The two header-order keys of that http fork become local constants.
+4. Copy the files from _chromequic-files.
+5. Apply the chromequic-*.patch files in the order listed in the script.
+6. Build quic. The script does not test, run `go test ./quic/...` after it.
+
+The qpack fork is copied rather than replaced with github.com/quic-go/qpack
+because it adds a Sensitive field to HeaderField and the never-index encoding
+that goes with it. Upstream qpack has neither, so http3 does not compile
+against it.
+
+The upstream is a fork of quic-go that matches Chrome's QUIC fingerprint. Its
+own uTLS is a fork of refraction-networking/utls. Every uTLS symbol the QUIC
+code needs exists in refraction v1.8.2 except three additions,
+UQUICConn.StoreSession, ClientHelloSpec.GREASESeed and UQUICConn.GetGREASESeed,
+which chromequic-refraction-utls.patch removes.
 
 ## websocket.sh
 
@@ -144,6 +178,56 @@ websocket-chrome-handshake.patch calls chromehttp1.WriteRequest. If you change
 that signature, the patched websocket tree does not compile. websocket.sh builds
 websocket as its last step, so the failure appears when you run the script.
 
+## chromequic-refraction-utls.patch
+
+Changes quic/internal/handshake/crypto_setup.go and three files under
+quic/http3. Applied by chromequic.sh.
+
+The upstream fork uses three uTLS additions that refraction-networking/utls
+v1.8.2 does not have. StoreSession becomes a no-op, so a QUIC session ticket is
+not stored and a later connection runs a full handshake. The GREASE seed is no
+longer carried across connections, so every connection draws its own GREASE
+values, which is what a browser does anyway when the session is new.
+
+The http3 files convert a utls.ConnectionState to a crypto/tls.ConnectionState
+before handing it to net/http and net/http/httptrace, which are typed against
+crypto/tls. The converter is tls_state.go from _chromequic-files.
+
+## chromequic-preset-transport-params.patch
+
+Changes uquicWrapper in quic/internal/handshake/crypto_setup.go. Applied by
+chromequic.sh.
+
+refraction-networking/utls marshals its QUICTransportParametersExtension from a
+structured TransportParameters value and its SetTransportParameters explicitly
+does not write into a preset, so a ClientHelloSpec built by hand emits
+quic_transport_parameters with length zero. The patch gives the wrapper a
+reference to the spec and fills the raw bytes into the utls.GenericExtension
+that carries extension 57. ApplyPreset copies extension pointers and does not
+marshal the ClientHello, so the value set here reaches the wire.
+
+Without the patch the handshake still completes against some servers, but JA4
+reports the connection as t rather than q, because the transport parameters
+extension is empty. That difference only shows on the wire, so the check is a
+stand capture rather than a unit test.
+
+## chromequic-chaos-protection.patch
+
+Replaces the fork's ChromeStyleInitialPackets with Chrome's chaos protector:
+client Initial CRYPTO frames are split, reordered and mixed with PING and
+PADDING. Guards in quic/chaos_protector_test.go.
+
+## chromequic-http3-settings.patch
+
+Writes SETTINGS in ascending identifier order with one GREASE setting, and
+skips PRIORITY_UPDATE on extended CONNECT. Guards in
+quic/http3/http3_settings_test.go.
+
+## chromequic-webtransport-connect.patch
+
+Lets a nil User-Agent suppress the default one, as Chrome's WebTransport
+CONNECT carries none. Guards in quic/http3/webtransport_connect_test.go.
+
 ## websocket-chrome-handshake.patch
 
 Changes websocket/client.go in two places. The upgrade request is written with
@@ -166,21 +250,50 @@ versions the way a browser does. Applied by dtls.sh.
 The guard is TestVendoredDTLSOffersBothProtocolVersions in dtls_vendor_test.go.
 It runs a loopback handshake and reads supported_versions off the ClientHello.
 
-## dtls-dualstack-server-prime.patch
+## dtls-handshake-fragment-mtu.patch
 
-Changes prepareDualStackServerHandshakeStart in internal/dtls/conn.go.
+Changes prepareHandshakeRecords and fragmentHandshake in internal/dtls/conn.go.
+Applied by dtls.sh.
 
-Upstream calls primeHandshakeRecv on the dual-stack client path. The dual-stack
-server path has no such call. Without the call, the server blocks until its
-retransmit timer fires, and a handshake between two dual-stack peers fails with
-a context deadline. The patch adds the same postSetup call that upstream
-already uses for the client.
+Upstream splits a handshake message into fragments of the full MTU and then
+adds the handshake fragment header and the record header on top, so a handshake
+datagram is larger than the configured MTU. Chrome sizes the first fragment so
+that the datagram is exactly the MTU. The patch subtracts the record overhead
+and the handshake header before it splits. The record overhead is the fixed
+record header, or, for a protected DTLS 1.3 record, the unified header with the
+active connection ID plus the AEAD expansion of the cipher suite.
 
-Applied by dtls.sh. The patch is not in upstream as of pion/dtls commit 16fcc843.
+The guard is TestVendoredDTLSFillsTheHandshakeDatagramToTheMTU in
+dtls_vendor_test.go. It runs a loopback handshake against an MTU of 200 bytes
+and checks that no client datagram is over the MTU and that one datagram
+reaches it.
 
-The guard is TestVendoredDTLSCompletesADualStackHandshake in
-dtls_vendor_test.go. Without the patch the server side of that handshake ends
-in a context deadline.
+## dtls-serverhello13-hook.patch
+
+Changes flight4Generate in
+internal/dtls/internal/flight/flight13/flight4handler.go. Applied by dtls.sh.
+
+Upstream calls ServerHelloMessageHook on the DTLS 1.2 path only, through
+dtlsflight.FinalizeServerHello. That helper cannot be reused here, because
+negotiation.ValidateServerHello12Context, which it calls, rejects any response
+carrying supported_versions, key_share or pre_shared_key, which is every 1.3
+server hello. Without the patch a 1.3 server hello ships pion's extension order
+and the profile hook never runs.
+
+The patch adds finalizeServerHello13. The hook may reorder the extensions and
+nothing else: the extension types before and after the hook must match, which
+is what the Chrome order needs and all it needs. A hooked connection ID is
+checked with the upstream dtlsflight.ValidateHookedConnectionIDLength, the same
+call the 1.2 path makes. The connection ID decision is taken from the hooked
+extensions rather than the ones built before the hook, so the session records
+the connection ID that goes on the wire.
+
+The guards are in dtls_vendor_test.go.
+TestVendoredDTLSCallsTheServerHelloHookOnVersion13 checks that the hook runs on
+a 1.3 handshake, TestVendoredDTLSServerHelloCarriesTheChromeOrderOnVersion13
+checks the emitted order, and
+TestVendoredDTLSRejectsAServerHelloHookThatLeavesTheExtensionSet checks that a
+hook which drops or resizes the connection ID fails the handshake.
 
 ## ice-keepalive-interval.patch
 
@@ -231,6 +344,78 @@ first builds an offer through the public API and compares the extmap lines of
 both media sections against a browser capture. Removing the sort call changes
 the order of the video section. Reversing the direction of the picker scan gives
 toffset the identifier 5 instead of 14.
+
+## webrtc-answer-codec-order.patch
+
+Emits answer codecs in the offer's payload type order. Guard:
+TestAnswerKeepsThePayloadTypeOrderOfTheOffer.
+
+## webrtc-rtcp-cname.patch
+
+Uses one random 16 character cname per peer connection instead of the stream
+ID. Guard: TestCnameIsOnePerPeerConnection.
+
+## webrtc-msid-track-identity.patch
+
+Gives local tracks a UUIDv4 track ID and the stream ID `-`. Guard:
+TestMediaLevelMsidHasTheChromeShape.
+
+## webrtc-ssrc-attributes.patch
+
+Emits only `cname` and `msid` on a=ssrc lines, no `mslabel` or `label`. Guard:
+TestSsrcCarriesOnlyCnameAndMsid.
+
+## webrtc-msid-semantic.patch
+
+Writes `a=msid-semantic: WMS` instead of `WMS *`. Guard:
+TestMsidSemanticHasTheChromeShape.
+
+## webrtc-answer-msid-signaling.patch
+
+Answers with the msid form the offer used: a=ssrc msid only for a Plan B
+offer, media level a=msid otherwise. Guard:
+TestAnswerDropsTheSsrcMsidWhenTheOfferCarriedBothForms.
+
+## webrtc-track-constructor-args.patch
+
+Removes the id and streamID arguments from NewTrackLocalStaticRTP and
+NewTrackLocalStaticSample, since the identity patch ignores them. This changes
+the public API.
+
+## webrtc-session-origin.patch
+
+Sets the o= session version to 2 and the address to 127.0.0.1, as Chrome does.
+Guard: TestVendoredWebRTCSeedsTheSessionOriginLikeChrome.
+
+## webrtc-codec-feedback.patch
+
+Gives transport-cc to Opus and to video codecs in Chrome's order, and writes
+a=fmtp after a=rtcp-fb. Guards in sdpcodec_vendor_test.go.
+
+## webrtc-answer-feedback-order.patch
+
+Answers with the local feedback list filtered by the offer. Guard:
+TestVendoredWebRTCAnswersWithTheLocalFeedbackOrder.
+
+## webrtc-attribute-order.patch
+
+Reorders session and media attributes by the tables in internal/sdporder, and
+adds Chrome's a=rtcp and a=ice-options lines. Guards in
+sdpsectionorder_vendor_test.go.
+
+## _chromequic-files
+
+Copied into quic by chromequic.sh.
+
+- header_order_keys.go: the two header-order keys that the
+  github.com/sardanioss/http fork exports and net/http does not.
+- tls_state.go: converts between the two ConnectionState types.
+- chaos_protector.go: the frame scattering called by
+  chromequic-chaos-protection.patch.
+- chaos_protector_test.go, http3_settings_test.go,
+  webtransport_connect_test.go: guards for the matching patches.
+
+The underscore prefix stops the go tool from building the directory.
 
 ## _dtls-files
 

@@ -1,0 +1,13 @@
+diff --git a/http3/request_writer.go b/http3/request_writer.go
+index 19e6659..a0a9aa8 100644
+--- a/http3/request_writer.go
++++ b/http3/request_writer.go
+@@ -220,7 +220,7 @@ func (w *requestWriter) encodeHeaders(req *http.Request, addGzipHeader bool, tra
+ 					}
+ 				}
+ 			}
+-			if !ok || len(vv) == 0 {
++			if !ok {
+ 				return
+ 			}
+ 

@@ -42,8 +42,16 @@ func sharedKeyLog() io.Writer {
 	return keyLogWriter
 }
 
+func KeyLogWriter() io.Writer {
+	return sharedKeyLog()
+}
+
 func chromeDialer() *net.Dialer {
 	return &net.Dialer{KeepAlive: tcpKeepAliveDisabled}
+}
+
+func ChromeDialer() *net.Dialer {
+	return chromeDialer()
 }
 
 type TLSOptions struct {
@@ -236,6 +244,12 @@ type chromeRoundTripper struct {
 func (t *chromeRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request.Header.Get("Accept-Encoding") == "" {
 		request.Header.Set("Accept-Encoding", chromeAcceptEncoding)
+	}
+	if _, present := request.Header["User-Agent"]; !present {
+		request.Header.Set("User-Agent", t.profile.userAgent)
+	}
+	if _, present := request.Header["Sec-Fetch-Site"]; present {
+		request.Header.Set("Sec-Fetch-Site", secFetchSiteForRequest(request))
 	}
 
 	port := request.URL.Port()

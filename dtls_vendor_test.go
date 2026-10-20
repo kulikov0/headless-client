@@ -2,6 +2,7 @@ package headless
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"slices"
 	"sync"
@@ -51,6 +52,23 @@ func runDTLSLoopback(
 	clientOptions []dtls.ClientOption,
 	serverOptions []dtls.ServerOption,
 ) dtlsLoopbackResult {
+	t.Helper()
+
+	result, err := dtlsLoopbackHandshake(t, clientOptions, serverOptions)
+	if err != nil {
+		t.Fatalf("%v; a deadline here means the dual-stack server path never primed its receiver", err)
+	}
+
+	return result
+}
+
+// dtlsLoopbackHandshake returns the handshake error instead of failing, so a
+// test can assert that the vendored tree rejects a handshake.
+func dtlsLoopbackHandshake(
+	t *testing.T,
+	clientOptions []dtls.ClientOption,
+	serverOptions []dtls.ServerOption,
+) (dtlsLoopbackResult, error) {
 	t.Helper()
 
 	certificate, err := selfsign.GenerateSelfSigned()
@@ -126,18 +144,22 @@ func runDTLSLoopback(
 		clientDone <- connection.HandshakeContext(handshakeContext)
 	}()
 
+	var handshakeErr error
 	for _, side := range []struct {
 		name string
 		done chan error
 	}{{"server", serverDone}, {"client", clientDone}} {
 		select {
 		case sideErr := <-side.done:
-			if sideErr != nil {
-				t.Fatalf("%s handshake: %v; a deadline here means the dual-stack server path never primed its receiver, so dtls-dualstack-server-prime.patch was lost", side.name, sideErr)
+			if sideErr != nil && handshakeErr == nil {
+				handshakeErr = fmt.Errorf("%s handshake: %w", side.name, sideErr)
 			}
 		case <-time.After(2 * vendorHandshakeTimeout):
 			t.Fatalf("%s never returned from the handshake", side.name)
 		}
+	}
+	if handshakeErr != nil {
+		return dtlsLoopbackResult{}, handshakeErr
 	}
 
 	result := dtlsLoopbackResult{clientDatagramSizes: clientPacketConnection.writtenSizes()}
@@ -152,7 +174,7 @@ func runDTLSLoopback(
 	default:
 	}
 
-	return result
+	return result, nil
 }
 
 func dtlsLoopbackClientHello(t *testing.T, serverOptions ...dtls.ServerOption) handshake.MessageClientHello {
@@ -196,6 +218,57 @@ func TestVendoredDTLSCallsTheServerHelloHookOnVersion13(t *testing.T) {
 	}
 	if !offersExtension(result.serverHello.Extensions, extension.TypeSupportedVersions) {
 		t.Fatalf("the hooked server hello carries %v, a 1.3 server hello carries supported_versions; the loopback negotiated 1.2 and this guard proved nothing", serverHelloExtensionOrder(&result.serverHello))
+	}
+}
+
+func TestVendoredDTLSRejectsAServerHelloHookThatLeavesTheExtensionSet(t *testing.T) {
+	connectionID := dtls.WithConnectionID(dtls.RandomCIDGenerator(8), dtls.CIDPathMigrationReject)
+	cases := []struct {
+		name          string
+		hook          func(handshake.MessageServerHello) handshake.Message
+		clientOptions []dtls.ClientOption
+		serverOptions []dtls.ServerOption
+	}{
+		{
+			name: "a dropped connection id",
+			hook: func(serverHello handshake.MessageServerHello) handshake.Message {
+				kept := make([]extension.Value, 0, len(serverHello.Extensions))
+				for _, value := range serverHello.Extensions {
+					if value.ExtensionType() != extension.TypeConnectionID {
+						kept = append(kept, value)
+					}
+				}
+				serverHello.Extensions = kept
+
+				return &serverHello
+			},
+			clientOptions: []dtls.ClientOption{connectionID},
+			serverOptions: []dtls.ServerOption{connectionID},
+		},
+		{
+			name: "a resized connection id",
+			hook: func(serverHello handshake.MessageServerHello) handshake.Message {
+				serverHello.Extensions = slices.Clone(serverHello.Extensions)
+				for index, value := range serverHello.Extensions {
+					if cid, ok := value.(*extension.ConnectionID); ok {
+						serverHello.Extensions[index] = &extension.ConnectionID{CID: append(slices.Clone(cid.CID), 0)}
+					}
+				}
+
+				return &serverHello
+			},
+			clientOptions: []dtls.ClientOption{connectionID},
+			serverOptions: []dtls.ServerOption{connectionID},
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			hooked := dtls.WithServerHelloMessageHook(testCase.hook)
+			if _, err := dtlsLoopbackHandshake(t, testCase.clientOptions, append(testCase.serverOptions, hooked)); err == nil {
+				t.Fatalf("the 1.3 handshake completed with %s in the hooked server hello; finalizeServerHello13 lost a guard and a hook can now change what the peers negotiate", testCase.name)
+			}
+		})
 	}
 }
 

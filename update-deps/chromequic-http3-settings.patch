@@ -1,0 +1,299 @@
+--- a/http3/client.go
++++ b/http3/client.go
+@@ -77,9 +77,11 @@ type ClientConn struct {
+ 	// life and are written from two goroutines: the control stream handler
+ 	// answers the peer's advertised table capacity, and the encoder
+ 	// instruction handler acknowledges what the peer inserts.
+-	qpackMx         sync.Mutex
+-	qpackEncoderStr *quic.SendStream
+-	qpackDecoderStr *quic.SendStream
++	qpackMx                 sync.Mutex
++	qpackEncoderStr         *quic.SendStream
++	qpackDecoderStr         *quic.SendStream
++	qpackEncoderStrTypeSent bool
++	qpackDecoderStrTypeSent bool
+ 
+ 	qlogger qlogwriter.Recorder
+ 	logger  *slog.Logger
+@@ -164,10 +166,8 @@ func newClientConn(
+ 		return c
+ 	}
+ 
+-	// Open QPACK encoder stream (Chrome opens this even without dynamic table)
+ 	c.openQPACKEncoderStream()
+ 
+-	// Open QPACK decoder stream (Chrome opens this even without dynamic table)
+ 	c.openQPACKDecoderStream()
+ 
+ 	// Small delay to ensure control/QPACK streams are transmitted before request stream.
+@@ -379,7 +379,7 @@ func (c *ClientConn) roundTrip(req *http.Request) (*http.Response, error) {
+ 	// a first-request-only thing; MaybeSendPriorityUpdate applies that rule.
+ 	// Gated on sendGreaseFrames so presets that don't behave like Chrome stay
+ 	// byte-clean.
+-	if c.rawConn.sendGreaseFrames {
++	if c.rawConn.sendGreaseFrames && !isExtendedConnectRequest(req) {
+ 		priorityValue := req.Header.Get("Priority")
+ 		if priorityValue == "" {
+ 			// Chrome emits the frame whether or not it also sent the header, so
+@@ -572,8 +572,6 @@ func appendQPACKPrefixedInt(b []byte, prefixBits uint8, pattern byte, v uint64)
+ 	return append(b, byte(v))
+ }
+ 
+-// openQPACKEncoderStream opens the QPACK encoder stream.
+-// Chrome opens this stream even without using dynamic tables.
+ func (c *ClientConn) openQPACKEncoderStream() {
+ 	str, err := c.rawConn.OpenUniStream()
+ 	if err != nil {
+@@ -582,20 +580,26 @@ func (c *ClientConn) openQPACKEncoderStream() {
+ 		}
+ 		return
+ 	}
+-	// Write stream type (QPACK encoder = 2)
+-	b := make([]byte, 0, 8)
+-	b = quicvarint.Append(b, streamTypeQPACKEncoderStream)
+-	if _, err := str.Write(b); err != nil {
+-		if c.logger != nil {
+-			c.logger.Debug("failed to write QPACK encoder stream type", "error", err)
+-		}
+-		return
+-	}
+ 	c.qpackMx.Lock()
+ 	c.qpackEncoderStr = str
+ 	c.qpackMx.Unlock()
+ }
+ 
++func (c *ClientConn) writeQPACKEncoderInstruction(data []byte) error {
++	c.qpackMx.Lock()
++	defer c.qpackMx.Unlock()
++	if c.qpackEncoderStr == nil {
++		return nil
++	}
++	if !c.qpackEncoderStrTypeSent {
++		data = append(quicvarint.Append(nil, streamTypeQPACKEncoderStream), data...)
++		c.qpackEncoderStrTypeSent = true
++	}
++	_, err := c.qpackEncoderStr.Write(data)
++
++	return err
++}
++
+ // sendQPACKTableCapacity answers the peer's advertised
+ // SETTINGS_QPACK_MAX_TABLE_CAPACITY with a Set Dynamic Table Capacity
+ // instruction on the encoder stream.
+@@ -613,20 +617,12 @@ func (c *ClientConn) sendQPACKTableCapacity(capacity uint64) {
+ 	if capacity > maxQPACKEncoderTableCapacity {
+ 		capacity = maxQPACKEncoderTableCapacity
+ 	}
+-	c.qpackMx.Lock()
+-	str := c.qpackEncoderStr
+-	c.qpackMx.Unlock()
+-	if str == nil {
+-		return
+-	}
+ 	// Set Dynamic Table Capacity: 001xxxxx, 5-bit prefix. RFC 9204 4.3.1.
+-	if _, err := str.Write(appendQPACKPrefixedInt(nil, 5, 0x20, capacity)); err != nil && c.logger != nil {
++	if err := c.writeQPACKEncoderInstruction(appendQPACKPrefixedInt(nil, 5, 0x20, capacity)); err != nil && c.logger != nil {
+ 		c.logger.Debug("failed to write QPACK Set Dynamic Table Capacity", "error", err)
+ 	}
+ }
+ 
+-// openQPACKDecoderStream opens the QPACK decoder stream.
+-// Chrome opens this stream even without using dynamic tables.
+ func (c *ClientConn) openQPACKDecoderStream() {
+ 	str, err := c.rawConn.OpenUniStream()
+ 	if err != nil {
+@@ -635,20 +631,26 @@ func (c *ClientConn) openQPACKDecoderStream() {
+ 		}
+ 		return
+ 	}
+-	// Write stream type (QPACK decoder = 3)
+-	b := make([]byte, 0, 8)
+-	b = quicvarint.Append(b, streamTypeQPACKDecoderStream)
+-	if _, err := str.Write(b); err != nil {
+-		if c.logger != nil {
+-			c.logger.Debug("failed to write QPACK decoder stream type", "error", err)
+-		}
+-		return
+-	}
+ 	c.qpackMx.Lock()
+ 	c.qpackDecoderStr = str
+ 	c.qpackMx.Unlock()
+ }
+ 
++func (c *ClientConn) writeQPACKDecoderInstruction(data []byte) error {
++	c.qpackMx.Lock()
++	defer c.qpackMx.Unlock()
++	if c.qpackDecoderStr == nil {
++		return nil
++	}
++	if !c.qpackDecoderStrTypeSent {
++		data = append(quicvarint.Append(nil, streamTypeQPACKDecoderStream), data...)
++		c.qpackDecoderStrTypeSent = true
++	}
++	_, err := c.qpackDecoderStr.Write(data)
++
++	return err
++}
++
+ // handleQPACKEncoderInstructions ingests the peer's encoder instructions and
+ // acknowledges what it inserted.
+ //
+@@ -662,14 +664,9 @@ func (c *ClientConn) handleQPACKEncoderInstructions(data []byte) error {
+ 	before := c.decoder.InsertCount()
+ 	err := c.decoder.ProcessEncoderInstructions(data)
+ 	if inserted := c.decoder.InsertCount() - before; inserted > 0 {
+-		c.qpackMx.Lock()
+-		str := c.qpackDecoderStr
+-		c.qpackMx.Unlock()
+-		if str != nil {
+-			// Insert Count Increment: 00xxxxxx, 6-bit prefix. RFC 9204 4.4.3.
+-			if _, werr := str.Write(appendQPACKPrefixedInt(nil, 6, 0x00, inserted)); werr != nil && c.logger != nil {
+-				c.logger.Debug("failed to write QPACK Insert Count Increment", "error", werr)
+-			}
++		// Insert Count Increment: 00xxxxxx, 6-bit prefix. RFC 9204 4.4.3.
++		if werr := c.writeQPACKDecoderInstruction(appendQPACKPrefixedInt(nil, 6, 0x00, inserted)); werr != nil && c.logger != nil {
++			c.logger.Debug("failed to write QPACK Insert Count Increment", "error", werr)
+ 		}
+ 	}
+ 	return err
+--- a/http3/conn.go
++++ b/http3/conn.go
+@@ -108,14 +108,7 @@ func (c *rawConn) openControlStream(settings *settingsFrame) (*quic.SendStream,
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	b := make([]byte, 0, 64)
+-	b = quicvarint.Append(b, streamTypeControlStream)
+-	b = settings.Append(b)
+-
+-	// Add GREASE frame after SETTINGS if enabled (mimics Chrome behavior)
+-	if c.sendGreaseFrames {
+-		b = appendGreaseFrame(b)
+-	}
++	b := appendControlStream(make([]byte, 0, 64), settings, c.sendGreaseFrames)
+ 
+ 	if c.qlogger != nil {
+ 		sf := qlog.SettingsFrame{
+@@ -497,6 +490,34 @@ func greaseFrame() (frameType uint64, payload []byte) {
+ 	return frameType, payload
+ }
+ 
++func appendControlStream(b []byte, settings *settingsFrame, sendGreaseFrames bool) []byte {
++	if sendGreaseFrames {
++		greased := *settings
++		greased.Other = make(map[uint64]uint64, len(settings.Other)+1)
++		maps.Copy(greased.Other, settings.Other)
++		greasedID, greasedValue := greaseSetting()
++		greased.Other[greasedID] = greasedValue
++		settings = &greased
++	}
++	b = quicvarint.Append(b, streamTypeControlStream)
++	b = settings.Append(b)
++	if sendGreaseFrames {
++		b = appendGreaseFrame(b)
++	}
++
++	return b
++}
++
++func greaseSetting() (id, value uint64) {
++	var b [8]byte
++	if _, err := rand.Read(b[:]); err != nil {
++		binary.LittleEndian.PutUint32(b[0:4], mrand.Uint32())
++		binary.LittleEndian.PutUint32(b[4:8], mrand.Uint32())
++	}
++
++	return 0x1f*uint64(binary.LittleEndian.Uint32(b[0:4])) + 0x21, uint64(binary.LittleEndian.Uint32(b[4:8]))
++}
++
+ // appendGreaseFrame appends a GREASE frame to the byte slice.
+ // GREASE frames help prevent implementation bugs from ossifying protocol extensions.
+ func appendGreaseFrame(b []byte) []byte {
+--- a/http3/frames.go
++++ b/http3/frames.go
+@@ -2,10 +2,12 @@ package http3
+ 
+ import (
+ 	"bytes"
++	"cmp"
+ 	"errors"
+ 	"fmt"
+ 	"io"
+ 	"maps"
++	"slices"
+ 
+ 	"github.com/kulikov0/headless-client/quic"
+ 	"github.com/kulikov0/headless-client/quic/http3/qlog"
+@@ -285,55 +287,37 @@ func parseSettingsFrame(r *countingByteReader, l uint64, streamID quic.StreamID,
+ 
+ func (f *settingsFrame) Append(b []byte) []byte {
+ 	b = quicvarint.Append(b, 0x4)
+-	var l int
+-	// Chrome order: 1 (QPACK_MAX_TABLE_CAPACITY), 6 (MAX_FIELD_SECTION_SIZE),
+-	// 7 (QPACK_BLOCKED_STREAMS), 51 (DATAGRAM), GREASE
++	entries := make([][2]uint64, 0, len(f.Other)+5)
+ 	if f.QPACKMaxTableCapacity >= 0 {
+-		l += quicvarint.Len(settingQPACKMaxTableCapacity) + quicvarint.Len(uint64(f.QPACKMaxTableCapacity))
++		entries = append(entries, [2]uint64{settingQPACKMaxTableCapacity, uint64(f.QPACKMaxTableCapacity)})
+ 	}
+ 	if f.MaxFieldSectionSize >= 0 {
+-		l += quicvarint.Len(settingMaxFieldSectionSize) + quicvarint.Len(uint64(f.MaxFieldSectionSize))
++		entries = append(entries, [2]uint64{settingMaxFieldSectionSize, uint64(f.MaxFieldSectionSize)})
+ 	}
+ 	if f.QPACKBlockedStreams >= 0 {
+-		l += quicvarint.Len(settingQPACKBlockedStreams) + quicvarint.Len(uint64(f.QPACKBlockedStreams))
++		entries = append(entries, [2]uint64{settingQPACKBlockedStreams, uint64(f.QPACKBlockedStreams)})
+ 	}
+ 	if f.Datagram {
+-		l += quicvarint.Len(settingDatagram) + quicvarint.Len(1)
++		entries = append(entries, [2]uint64{settingDatagram, 1})
+ 	}
+ 	if f.ExtendedConnect {
+-		l += quicvarint.Len(settingExtendedConnect) + quicvarint.Len(1)
++		entries = append(entries, [2]uint64{settingExtendedConnect, 1})
+ 	}
+-	// Other settings (includes GREASE) at the end
+ 	for id, val := range f.Other {
+-		l += quicvarint.Len(id) + quicvarint.Len(val)
+-	}
+-	b = quicvarint.Append(b, uint64(l))
+-	// Write settings in Chrome order
+-	if f.QPACKMaxTableCapacity >= 0 {
+-		b = quicvarint.Append(b, settingQPACKMaxTableCapacity)
+-		b = quicvarint.Append(b, uint64(f.QPACKMaxTableCapacity))
+-	}
+-	if f.MaxFieldSectionSize >= 0 {
+-		b = quicvarint.Append(b, settingMaxFieldSectionSize)
+-		b = quicvarint.Append(b, uint64(f.MaxFieldSectionSize))
+-	}
+-	if f.QPACKBlockedStreams >= 0 {
+-		b = quicvarint.Append(b, settingQPACKBlockedStreams)
+-		b = quicvarint.Append(b, uint64(f.QPACKBlockedStreams))
++		entries = append(entries, [2]uint64{id, val})
+ 	}
+-	if f.Datagram {
+-		b = quicvarint.Append(b, settingDatagram)
+-		b = quicvarint.Append(b, 1)
+-	}
+-	if f.ExtendedConnect {
+-		b = quicvarint.Append(b, settingExtendedConnect)
+-		b = quicvarint.Append(b, 1)
++	slices.SortFunc(entries, func(a, b [2]uint64) int { return cmp.Compare(a[0], b[0]) })
++
++	var l int
++	for _, entry := range entries {
++		l += quicvarint.Len(entry[0]) + quicvarint.Len(entry[1])
+ 	}
+-	// Other settings (includes GREASE) at the end
+-	for id, val := range f.Other {
+-		b = quicvarint.Append(b, id)
+-		b = quicvarint.Append(b, val)
++	b = quicvarint.Append(b, uint64(l))
++	for _, entry := range entries {
++		b = quicvarint.Append(b, entry[0])
++		b = quicvarint.Append(b, entry[1])
+ 	}
++
+ 	return b
+ }
+ 

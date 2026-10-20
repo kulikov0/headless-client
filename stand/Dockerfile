@@ -2,7 +2,7 @@ FROM golang@sha256:1d414b0376b53ec94b9a2493229adb81df8b90af014b18619732f1ceaaf72
 
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod edit -dropreplace github.com/kulikov0/headless-client -droprequire github.com/kulikov0/headless-client && go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
 RUN CGO_ENABLED=0 go build -trimpath -o /out/wirediff ./cmd/wirediff

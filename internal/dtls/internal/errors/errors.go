@@ -43,6 +43,7 @@ var (
 	ErrInvalidPrivateKey                    = stderrors.New("invalid private key type")
 	ErrInvalidSignatureAlgorithm            = stderrors.New("invalid signature algorithm")
 	ErrInvalidExtendedMasterSecretType      = stderrors.New("invalid extended master secret type")
+	ErrNilRemoteAddr                        = stderrors.New("remote address cannot be nil")
 	ErrInvalidCertificateSignatureAlgorithm = stderrors.New(
 		"certificate uses a signature algorithm that is not allowed",
 	)
@@ -52,6 +53,9 @@ var (
 	ErrNoAvailableCipherSuites = stderrors.New(
 		"connection can not be created, no CipherSuites satisfy this Config",
 	)
+	// ErrCipherSuiteNotFIPSApproved is returned when a cipher the Go FIPS module
+	// doesn't provide (ChaCha20-Poly1305 or AES-CCM) would be used in FIPS mode.
+	ErrCipherSuiteNotFIPSApproved        = stderrors.New("cipher suite not approved in FIPS mode")
 	ErrNoAvailablePSKCipherSuite         = stderrors.New("connection can not be created, pre-shared key present but no compatible CipherSuite")
 	ErrNoAvailableCertificateCipherSuite = stderrors.New("connection can not be created, certificate present but no compatible CipherSuite")
 	ErrNoAvailableSignatureSchemes       = stderrors.New(
@@ -117,8 +121,8 @@ var (
 	ErrNilVerifyConnection = stderrors.New(
 		"verify connection option requires a non-nil callback",
 	)
-	ErrInvalidMTU                    = stderrors.New("MTU must be positive")
-	ErrInvalidReceiveBufferSize      = stderrors.New("receive buffer size must be positive")
+	ErrInvalidMTU                    = stderrors.New("MTU must be between 1 and 65535 bytes")
+	ErrInvalidReceiveBufferSize      = stderrors.New("receive buffer size must be between 1 and 65535 bytes")
 	ErrInvalidReplayProtectionWindow = stderrors.New(
 		"replay protection window must be non-negative",
 	)
@@ -137,6 +141,7 @@ var (
 	ErrNilConnectionIDGenerator = stderrors.New(
 		"connection ID generator option requires a non-nil function",
 	)
+	ErrInvalidConnectionIDLength = stderrors.New("invalid connection ID length")
 	ErrNilPaddingLengthGenerator = stderrors.New(
 		"padding length generator option requires a non-nil function",
 	)

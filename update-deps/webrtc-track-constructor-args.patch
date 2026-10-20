@@ -1,0 +1,33 @@
+--- a/track_local_static.go	2026-09-11 15:10:27
++++ b/track_local_static.go	2026-09-11 15:11:51
+@@ -42,7 +42,6 @@
+ // NewTrackLocalStaticRTP returns a TrackLocalStaticRTP.
+ func NewTrackLocalStaticRTP(
+ 	c RTPCodecCapability,
+-	id, streamID string,
+ 	options ...func(*TrackLocalStaticRTP),
+ ) (*TrackLocalStaticRTP, error) {
+ 	t := &TrackLocalStaticRTP{
+@@ -247,10 +246,9 @@
+ // NewTrackLocalStaticSample returns a TrackLocalStaticSample.
+ func NewTrackLocalStaticSample(
+ 	c RTPCodecCapability,
+-	id, streamID string,
+ 	options ...func(*TrackLocalStaticRTP),
+ ) (*TrackLocalStaticSample, error) {
+-	rtpTrack, err := NewTrackLocalStaticRTP(c, id, streamID, options...)
++	rtpTrack, err := NewTrackLocalStaticRTP(c, options...)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+--- a/peerconnection.go	2026-09-11 15:10:27
++++ b/peerconnection.go	2026-09-11 15:11:51
+@@ -2321,7 +2321,7 @@
+ 		if len(codecs) == 0 {
+ 			return nil, ErrNoCodecsAvailable
+ 		}
+-		track, err := NewTrackLocalStaticSample(codecs[0].RTPCodecCapability, util.MathRandAlpha(16), util.MathRandAlpha(16))
++		track, err := NewTrackLocalStaticSample(codecs[0].RTPCodecCapability)
+ 		if err != nil {
+ 			return nil, err
+ 		}

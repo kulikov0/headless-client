@@ -5,7 +5,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DST="$REPO/internal/dtls"
 UD="$REPO/update-deps"
 UPSTREAM="https://github.com/pion/dtls"
-COMMIT="16fcc8432011043c73b2cc3ae7e09f9429dd925d"
+COMMIT="733a38094d1093c55e87899956a49e727755e2ef"
 OLD="github.com/pion/dtls/v3"
 NEW="github.com/kulikov0/headless-client/internal/dtls"
 
@@ -44,7 +44,9 @@ rm -rf "$DST/.git" "$DST/.github" "$DST/go.mod" "$DST/go.sum"
 find "$DST" -type d -name '.git' -exec rm -rf {} + 2>/dev/null || true
 find "$DST" -name '*_test.go' -delete
 find "$DST" -type d \( -name testdata -o -name examples -o -name e2e \) -exec rm -rf {} + 2>/dev/null || true
-rm -f "$DST/README.md" "$DST/codecov.yml" "$DST/renovate.json"
+rm -f "$DST/codecov.yml" "$DST/renovate.json" "$DST/.gitignore" "$DST/.golangci.yml" \
+  "$DST/.goreleaser.yml" "$DST/.editorconfig"
+find "$DST" -name 'README.md' -delete
 
 grep -rl "$OLD" "$DST" --include='*.go' | while read -r f; do
   perl -pi -e "s#\\Q$OLD\\E#$NEW#g" "$f"
@@ -53,7 +55,6 @@ done
 cp "$UD"/_dtls-files/*.go "$DST/"
 
 apply_patch "$DST" "$UD/dtls-default-version.patch"
-apply_patch "$DST" "$UD/dtls-dualstack-server-prime.patch"
 apply_patch "$DST" "$UD/dtls-handshake-fragment-mtu.patch"
 apply_patch "$DST" "$UD/dtls-serverhello13-hook.patch"
 

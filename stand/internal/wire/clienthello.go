@@ -62,6 +62,7 @@ type Hello struct {
 	RecordVersion       uint16               `json:"recordVersion"`
 	HelloVersion        uint16               `json:"helloVersion"`
 	MessageSeq          uint16               `json:"messageSeq"`
+	Random              []byte               `json:"random"`
 	SessionIDLen        int                  `json:"sessionIdLen"`
 	CookieLen           int                  `json:"cookieLen"`
 	CipherSuites        []uint16             `json:"cipherSuites"`
@@ -251,9 +252,11 @@ func parseHelloBody(reader *byteReader, hello *Hello, isDTLS, isClient bool) err
 		return err
 	}
 	hello.HelloVersion = helloVersion
-	if _, err := reader.skip(helloRandomLen); err != nil {
+	random, err := reader.bytes(helloRandomLen)
+	if err != nil {
 		return err
 	}
+	hello.Random = random
 
 	sessionIDLen, err := reader.u8()
 	if err != nil {

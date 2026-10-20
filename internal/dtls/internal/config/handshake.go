@@ -120,6 +120,7 @@ type HandshakeConfig struct {
 	DisableRetransmitBackoff      bool
 	EllipticCurves                []elliptic.Curve
 	InsecureSkipHelloVerify       bool
+	ReceiveCIDLength              int
 	ConnectionIDGenerator         func() []byte
 	EnableRRC                     bool
 	HelloRandomBytesGenerator     func() [handshake.RandomBytesLength]byte
@@ -127,16 +128,54 @@ type HandshakeConfig struct {
 	KeyLogWriter                  io.Writer
 	LocalGetCertificate           func(*ClientHelloInfo) (*tls.Certificate, error)
 	LocalGetClientCertificate     func(*CertificateRequestInfo) (*tls.Certificate, error)
-	InitialEpoch                  uint16
+	InitialEpoch                  uint64
 	ClientHelloMessageHook        func(handshake.MessageClientHello) handshake.Message
 	ServerHelloMessageHook        func(handshake.MessageServerHello) handshake.Message
 	CertificateRequestMessageHook func(handshake.MessageCertificateRequest) handshake.Message
 	ResumeState                   *internalstate.State
 	MinVersion                    protocol.Version
 	MaxVersion                    protocol.Version
+	TimerFactory                  func(time.Duration) Timer
 
 	nameToCertificate map[string]*tls.Certificate
 	mu                sync.Mutex
+}
+
+// GenerateConnectionID returns a CID matching the configured receive length.
+func (c *HandshakeConfig) GenerateConnectionID() ([]byte, error) {
+	cid := c.ConnectionIDGenerator()
+	if len(cid) != c.ReceiveCIDLength {
+		return nil, fmt.Errorf("%w: generator returned %d bytes, want %d", dtlserrors.ErrInvalidConnectionIDLength, len(cid), c.ReceiveCIDLength)
+	}
+
+	return cid, nil
+}
+
+// Timer is the timer surface used by the handshake state machines.
+type Timer interface {
+	C() <-chan time.Time
+	Stop()
+}
+
+type systemTimer struct {
+	timer *time.Timer
+}
+
+func (t *systemTimer) C() <-chan time.Time {
+	return t.timer.C
+}
+
+func (t *systemTimer) Stop() {
+	t.timer.Stop()
+}
+
+// NewTimer returns a handshake timer.
+func (c *HandshakeConfig) NewTimer(d time.Duration) Timer {
+	if c.TimerFactory != nil {
+		return c.TimerFactory(d)
+	}
+
+	return &systemTimer{timer: time.NewTimer(d)}
 }
 
 func (c *HandshakeConfig) WriteKeyLog(label string, clientRandom, secret []byte) {

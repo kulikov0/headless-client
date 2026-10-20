@@ -9,10 +9,13 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/megamen32/headless-client/webrtc/internal/util"
 	"github.com/megamen32/headless-client/webrtc/pkg/media"
 	"github.com/pion/rtp"
 )
+
+const msidNoStreamID = "-"
 
 // trackBinding is a single bind for a Track
 // Bind can be called multiple times, this stores the
@@ -39,14 +42,13 @@ type TrackLocalStaticRTP struct {
 // NewTrackLocalStaticRTP returns a TrackLocalStaticRTP.
 func NewTrackLocalStaticRTP(
 	c RTPCodecCapability,
-	id, streamID string,
 	options ...func(*TrackLocalStaticRTP),
 ) (*TrackLocalStaticRTP, error) {
 	t := &TrackLocalStaticRTP{
 		codec:    c,
 		bindings: []trackBinding{},
-		id:       id,
-		streamID: streamID,
+		id:       uuid.NewString(),
+		streamID: msidNoStreamID,
 	}
 
 	for _, option := range options {
@@ -244,10 +246,9 @@ type TrackLocalStaticSample struct {
 // NewTrackLocalStaticSample returns a TrackLocalStaticSample.
 func NewTrackLocalStaticSample(
 	c RTPCodecCapability,
-	id, streamID string,
 	options ...func(*TrackLocalStaticRTP),
 ) (*TrackLocalStaticSample, error) {
-	rtpTrack, err := NewTrackLocalStaticRTP(c, id, streamID, options...)
+	rtpTrack, err := NewTrackLocalStaticRTP(c, options...)
 	if err != nil {
 		return nil, err
 	}

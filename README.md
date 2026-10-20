@@ -52,11 +52,20 @@ The package is named `headless`.
   pool with Chrome's per-host limit and idle timeout.
 - Headers: user agent, client hints, Accept, Accept-Encoding, Sec-Fetch-*.
 - WebSocket: the Chrome upgrade handshake.
+- QUIC: the two ClientHellos Chrome produces, transport parameters in Chrome's
+  shuffled order with one GREASE, Chrome's Initial datagram size, and Initial
+  CRYPTO frames scattered the way Chrome's chaos protector does.
+- HTTP/3 and WebTransport: Chrome's control stream and QPACK streams, and the
+  WebTransport CONNECT header block.
 - WebRTC: DTLS ClientHello extension shuffling, optional DTLS 1.3 mimicry,
   ServerHello extension order on both DTLS versions, no HelloVerifyRequest,
   handshake fragments sized so the datagram fills the MTU, SRTP profile order,
   RTP header extension set, identifiers and order, ICE credential shape, ICE
   keepalive interval.
+- SDP: Chrome's session origin, attribute order at the session and the media
+  level, one `a=fingerprint` per media section, cname and msid identity
+  strings, RTCP feedback set and order per codec, and answers in the offer's
+  payload type order.
 - TCP: keepalive disabled, as in Chrome.
 
 ## Usage
@@ -101,6 +110,19 @@ disables certificate verification.
 profile value, and a function field cannot be part of a map key. Use `Transport`
 when options are needed.
 
+A custom `DialContext` replaces the dialer that disables the TCP keepalive.
+`ChromeDialer` returns that dialer, so a proxy dialer can build on it and keep
+the Chrome TCP behavior.
+
+```go
+transport := headless.ChromeWindows.Transport(headless.TLSOptions{
+	DialContext: headless.ChromeDialer().DialContext,
+})
+```
+
+The transport sets Chrome's user agent on a request that has no `User-Agent`
+header.
+
 ### WebSocket
 
 ```go
@@ -109,6 +131,55 @@ dialer := headless.ChromeWindows.WebSocketDialer(headless.TLSOptions{})
 
 The dialer ignores the `HTTP_PROXY` and `HTTPS_PROXY` environment variables.
 Pass a proxy through `TLSOptions.DialContext`.
+
+### QUIC and WebTransport
+
+`DialQUIC` opens a QUIC connection with Chrome's handshake.
+
+```go
+conn, err := headless.ChromeWindows.DialQUIC(ctx, address, headless.QUICOptions{
+	Transport:  headless.QUICWebTransport,
+	ServerName: "example.com",
+})
+```
+
+`QUICOptions` has eight fields. `Transport` selects the ClientHello and is
+described below. `ServerName` sets the SNI value and defaults to the host part
+of `address`. `ALPN` sets the ALPN list and defaults to `h3`.
+`InsecureSkipVerify` disables certificate verification. `EnableDatagrams`
+enables RFC 9221 datagrams. `KeepAlivePeriod` and `MaxIdleTimeout` set the
+matching QUIC timers. `KeyLogWriter` receives the QUIC session keys.
+
+`QUICConfig` returns the TLS config and the QUIC config without dialing. Use it
+when the caller builds its own transport.
+
+Chrome sends two different QUIC ClientHellos. `Transport` selects which one to
+send. A server sees a different fingerprint for each.
+
+`QUICWebTransport` matches the handshake Chrome sends when a page opens a
+WebTransport session. Chrome's WebTransport client creates its own crypto
+config and does not pass it to the code that configures the HTTP/3 session
+pool. The handshake therefore uses BoringSSL defaults: no ECH extension, no
+post-quantum group, and BoringSSL's default signature algorithm list.
+
+`QUICHTTP3` matches the handshake Chrome sends for an HTTP/3 request. It adds
+the values that the HTTP/3 session pool sets: ECH GREASE, the X25519MLKEM768
+group, and the google_connection_options transport parameter.
+
+The supported group list comes from the BoringSSL default for the Chrome
+version in `measuredChromeMajorVersion`. That default changed between the
+BoringSSL revisions pinned by Chromium 151 and 153. When you change
+`measuredChromeMajorVersion`, read `ssl/ssl_key_share.cc` at the pinned
+revision and update `boringSSLMLKEMDefaultChromeMajorVersion`.
+
+`WebTransportConnectHeader` returns the header block for the extended CONNECT
+request that opens a WebTransport session. It carries Chrome's pseudo-header
+order, `sec-webtransport-http3-draft02` and `origin`, and no user agent, as in
+Chrome.
+
+```go
+header := headless.ChromeWindows.WebTransportConnectHeader("https://example.com")
+```
 
 ### WebRTC
 
@@ -186,6 +257,9 @@ connection pool.
 If `SSLKEYLOGFILE` is set, the library appends TLS session keys to that file, so
 Wireshark can decrypt the capture. The file is opened once per process.
 
+`KeyLogWriter` returns that file, or nil when the variable is unset. Pass it to
+`QUICOptions.KeyLogWriter` to log QUIC keys to the same file.
+
 ## Method
 
 Values come from Chromium and libwebrtc source. Packet captures verify them.
@@ -239,10 +313,10 @@ The tests check the values the library produces.
 - The transport tests run against a local server and check connection reuse.
 
 Every vendored patch has a guard test that fails when a regeneration loses it.
-`internal/chromehttp2` keeps its guards inside the tree, and `chromehttp2.sh`
-copies them back after each run. The guards for `internal/dtls`, `internal/ice`
-and `websocket` are in the root package, because those scripts delete every test
-file in the tree they rewrite.
+`internal/chromehttp2` and `quic` keep their guards inside the tree, and their
+scripts copy them back after each run. The guards for `internal/dtls`,
+`internal/ice`, `webrtc` and `websocket` are in the root package, because those
+scripts delete every test file in the tree they rewrite.
 
 ## Known gaps
 
@@ -251,7 +325,6 @@ The following gaps are scheduled. Gaps that will not be addressed are under
 
 ### HTTP
 
-- HTTP/3 and QUIC are not implemented.
 - Accept-Language is fixed to ru-RU. Chrome reads this value from a per-locale
   resource. It does not derive the value, so a table is required.
 - sec-ch-ua-platform is the only client hint value that was not read from
@@ -260,14 +333,15 @@ The following gaps are scheduled. Gaps that will not be addressed are under
 
 ### WebRTC
 
-- The SDP has pion's shape. The CNAME is derived from the stream ID, where
-  Chrome uses a random value. The codec set and payload types are pion defaults.
-  The attribute order is pion's. A server that reads the offer can detect all of
-  this.
-- No STUN keepalive is sent to the STUN server. Chrome sends one every 10 s in
-  addition to the peer keepalive. Over a 170 s capture this library sent two
-  packets to its STUN servers, both during gathering, and nothing after.
-- RTCP feedback format and cadence have not been audited.
+- The codec set and payload types in the SDP are pion defaults. A server that
+  reads the offer can detect them. The attribute order, identity strings and
+  RTCP feedback lines already match Chrome.
+- No keepalive is sent to the STUN and TURN servers. Chrome sends one every 10 s
+  to each, in addition to the peer keepalive. Over a 301 s capture this library
+  sent four packets to its STUN server and six to its TURN server, all in two
+  gathering rounds, then nothing for the remaining 218 s.
+- The RTCP packet format and cadence on the wire have not been audited. The
+  feedback types negotiated in the SDP match Chrome.
 - The ICE candidate priority is one number that packs the candidate type, a
   local preference and the component. pion always writes 65535 as the local
   preference, so a host candidate gets 2130706431 where the reference capture
@@ -327,7 +401,7 @@ after the task runs, which adds the extra millisecond.
 
 ## Layout
 
-`internal/dtls`, `internal/ice`, `internal/chromehttp2`, `webrtc`, and
+`internal/dtls`, `internal/ice`, `internal/chromehttp2`, `quic`, `webrtc`, and
 `websocket` are vendored. They are copies of upstream packages with fingerprint
 patches applied. Do not edit them by hand. Run the scripts in `update-deps` to
 regenerate them. Guard tests fail if a regenerated tree loses a patch.

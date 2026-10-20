@@ -209,7 +209,6 @@ func ConfigureTWCCSenderWithOptions(mediaEngine *MediaEngine, interceptorRegistr
 		return err
 	}
 
-	mediaEngine.RegisterFeedback(RTCPFeedback{Type: TypeRTCPFBTransportCC}, RTPCodecTypeAudio)
 	if err := mediaEngine.RegisterHeaderExtension(
 		RTPHeaderExtensionCapability{URI: sdp.TransportCCURI}, RTPCodecTypeAudio,
 	); err != nil {

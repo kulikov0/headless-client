@@ -17,9 +17,24 @@ import (
 	"sync/atomic"
 
 	"github.com/megamen32/headless-client/internal/ice"
+	"github.com/megamen32/headless-client/internal/sdporder"
 	"github.com/pion/logging"
 	"github.com/pion/sdp/v3"
 )
+
+const (
+	chromeRTCPAttributeValue = "9 IN IP4 0.0.0.0"
+	chromeICEOptionsValue    = "trickle"
+	chromeSCTPSendBufferSize = 256 * 1024
+)
+
+func reorderMediaAttributes(media *sdp.MediaDescription) *sdp.MediaDescription {
+	media.Attributes = sdporder.Reorder(sdporder.LevelMedia, media.Attributes, func(attribute sdp.Attribute) string {
+		return attribute.Key
+	})
+
+	return media
+}
 
 // trackDetails represents any media source that can be represented in a SDP
 // This isn't keyed by SSRC because it also needs to support rid based sources.
@@ -388,9 +403,9 @@ func addDataMediaSection(
 	}).
 		WithValueAttribute(sdp.AttrKeyConnectionSetup, dtlsRole.String()).
 		WithValueAttribute(sdp.AttrKeyMID, midValue).
-		WithPropertyAttribute(RTPTransceiverDirectionSendrecv.String()).
+		WithValueAttribute("ice-options", chromeICEOptionsValue).
 		WithPropertyAttribute("sctp-port:5000").
-		WithValueAttribute("max-message-size", fmt.Sprintf("%d", sctpMaxMessageSize)).
+		WithValueAttribute("max-message-size", fmt.Sprintf("%d", min(sctpMaxMessageSize, chromeSCTPSendBufferSize))).
 		WithICECredentials(iceParams.UsernameFragment, iceParams.Password)
 
 	if len(sctpInit) != 0 {
@@ -406,7 +421,7 @@ func addDataMediaSection(
 		}
 	}
 
-	descr.WithMedia(media)
+	descr.WithMedia(reorderMediaAttributes(media))
 
 	return nil
 }
@@ -431,6 +446,7 @@ func populateLocalCandidates(
 		if err = addCandidatesToMediaDescriptions(candidates, mediaDescr, iceGatheringState); err != nil {
 			return sessionDescription
 		}
+		reorderMediaAttributes(mediaDescr)
 	}
 
 	sdp, err := parsed.Marshal()
@@ -445,11 +461,30 @@ func populateLocalCandidates(
 	}
 }
 
+func withSSRCIdentity(
+	media *sdp.MediaDescription,
+	ssrc SSRC,
+	identity sourceIdentity,
+	track TrackLocal,
+) *sdp.MediaDescription {
+	media = media.WithValueAttribute(sdp.AttrKeySSRC, fmt.Sprintf("%d cname:%s", ssrc, identity.cname))
+
+	if !identity.emitSsrcMsid {
+		return media
+	}
+
+	return media.WithValueAttribute(
+		sdp.AttrKeySSRC,
+		fmt.Sprintf("%d msid:%s %s", ssrc, track.StreamID(), track.ID()),
+	)
+}
+
 //nolint:gocognit,cyclop
 func addSenderSDP(
 	mediaSection mediaSection,
 	isPlanB bool,
 	media *sdp.MediaDescription,
+	identity sourceIdentity,
 ) {
 	for _, mt := range mediaSection.transceivers {
 		sender := mt.Sender()
@@ -487,32 +522,19 @@ func addSenderSDP(
 				)
 			}
 
-			media = media.WithMediaSource(
-				uint32(encoding.SSRC),
-				track.StreamID(), /* cname */
-				track.StreamID(), /* streamLabel */
-				track.ID(),
-			)
+			media = withSSRCIdentity(media, encoding.SSRC, identity, track)
 
 			if !isPlanB {
 				if encoding.RTX.SSRC != 0 {
-					media = media.WithMediaSource(
-						uint32(encoding.RTX.SSRC),
-						track.StreamID(), /* cname */
-						track.StreamID(), /* streamLabel */
-						track.ID(),
-					)
+					media = withSSRCIdentity(media, encoding.RTX.SSRC, identity, track)
 				}
 				if encoding.FEC.SSRC != 0 {
-					media = media.WithMediaSource(
-						uint32(encoding.FEC.SSRC),
-						track.StreamID(), /* cname */
-						track.StreamID(), /* streamLabel */
-						track.ID(),
-					)
+					media = withSSRCIdentity(media, encoding.FEC.SSRC, identity, track)
 				}
 
-				media = media.WithPropertyAttribute("msid:" + track.StreamID() + " " + track.ID())
+				if identity.emitMediaSectionMsid {
+					media = media.WithPropertyAttribute("msid:" + track.StreamID() + " " + track.ID())
+				}
 			}
 		}
 
@@ -547,6 +569,7 @@ func addTransceiverSDP(
 	iceGatheringState ICEGatheringState,
 	mediaSection mediaSection,
 	ignoreRidPauseForRecv bool,
+	identity sourceIdentity,
 ) (bool, error) {
 	transceivers := mediaSection.transceivers
 	if len(transceivers) < 1 {
@@ -555,8 +578,10 @@ func addTransceiverSDP(
 	// Use the first transceiver to generate the section attributes
 	transceiver := transceivers[0]
 	media := sdp.NewJSEPMediaDescription(transceiver.kind.String(), []string{}).
+		WithValueAttribute("rtcp", chromeRTCPAttributeValue).
 		WithValueAttribute(sdp.AttrKeyConnectionSetup, dtlsRole.String()).
 		WithValueAttribute(sdp.AttrKeyMID, midValue).
+		WithValueAttribute("ice-options", chromeICEOptionsValue).
 		WithICECredentials(iceParams.UsernameFragment, iceParams.Password).
 		WithPropertyAttribute(sdp.AttrKeyRTCPMux).
 		WithPropertyAttribute(sdp.AttrKeyRTCPRsize)
@@ -565,7 +590,7 @@ func addTransceiverSDP(
 	for _, codec := range codecs {
 		name := strings.TrimPrefix(codec.MimeType, "audio/")
 		name = strings.TrimPrefix(name, "video/")
-		media.WithCodec(uint8(codec.PayloadType), name, codec.ClockRate, codec.Channels, codec.SDPFmtpLine)
+		media.WithCodec(uint8(codec.PayloadType), name, codec.ClockRate, codec.Channels, "")
 
 		for _, feedback := range codec.RTPCodecCapability.RTCPFeedback {
 			if feedback.Parameter == "" {
@@ -573,6 +598,10 @@ func addTransceiverSDP(
 			} else {
 				media.WithValueAttribute("rtcp-fb", fmt.Sprintf("%d %s %s", codec.PayloadType, feedback.Type, feedback.Parameter))
 			}
+		}
+
+		if codec.SDPFmtpLine != "" {
+			media.WithValueAttribute("fmtp", fmt.Sprintf("%d %s", codec.PayloadType, codec.SDPFmtpLine))
 		}
 	}
 	if len(codecs) == 0 {
@@ -644,7 +673,7 @@ func addTransceiverSDP(
 		media.WithValueAttribute(sdpAttributeSimulcast, "recv "+strings.Join(recvRids, ";"))
 	}
 
-	addSenderSDP(mediaSection, isPlanB, media)
+	addSenderSDP(mediaSection, isPlanB, media, identity)
 
 	media = media.WithPropertyAttribute(transceiver.Direction().String())
 
@@ -658,7 +687,7 @@ func addTransceiverSDP(
 		}
 	}
 
-	descr.WithMedia(media)
+	descr.WithMedia(reorderMediaAttributes(media))
 
 	return true, nil
 }
@@ -710,6 +739,7 @@ func populateSDP(
 	matchBundleGroup *string,
 	sctpMaxMessageSize uint32,
 	ignoreRidPauseForRecv bool,
+	identity sourceIdentity,
 ) (*sdp.SessionDescription, error) {
 	var err error
 	mediaDtlsFingerprints := []DTLSFingerprint{}
@@ -765,6 +795,7 @@ func populateSDP(
 				iceGatheringState,
 				section,
 				ignoreRidPauseForRecv,
+				identity,
 			)
 			if err != nil {
 				return nil, err
@@ -798,6 +829,10 @@ func populateSDP(
 	if bundleCount > 0 {
 		descr = descr.WithValueAttribute(sdp.AttrKeyGroup, bundleValue)
 	}
+
+	descr.Attributes = sdporder.Reorder(sdporder.LevelSession, descr.Attributes, func(attribute sdp.Attribute) string {
+		return attribute.Key
+	})
 
 	return descr, nil
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 )
 
 const (
@@ -194,13 +195,28 @@ func quicClientInitialKeys(destConnID []byte) (key, iv, headerKey []byte, err er
 
 // expandLabel is HKDF-Expand-Label from TLS 1.3, which QUIC reuses verbatim.
 func expandLabel(secret []byte, label string, length int) ([]byte, error) {
+	return expandLabelHash(sha256.New, secret, label, length)
+}
+
+func expandLabelHash(newHash func() hash.Hash, secret []byte, label string, length int) ([]byte, error) {
 	full := "tls13 " + label
 	info := make([]byte, 0, 2+1+len(full)+1)
 	info = binary.BigEndian.AppendUint16(info, uint16(length))
 	info = append(info, byte(len(full)))
 	info = append(info, full...)
 	info = append(info, 0)
-	return hkdf.Expand(sha256.New, secret, string(info), length)
+	return hkdf.Expand(newHash, secret, string(info), length)
+}
+
+// RFC 8446 section 5.3
+func xorNonce(iv []byte, sequence uint64) []byte {
+	nonce := append([]byte(nil), iv...)
+	var counter [8]byte
+	binary.BigEndian.PutUint64(counter[:], sequence)
+	for i := 0; i < 8; i++ {
+		nonce[len(nonce)-8+i] ^= counter[i]
+	}
+	return nonce
 }
 
 func quicHeaderMask(headerKey, sample []byte) ([]byte, error) {
@@ -225,13 +241,7 @@ func quicDecrypt(key, iv []byte, packetNum uint64, header, ciphertext []byte) ([
 	if err != nil {
 		return nil, err
 	}
-	nonce := append([]byte(nil), iv...)
-	var counter [8]byte
-	binary.BigEndian.PutUint64(counter[:], packetNum)
-	for i := 0; i < 8; i++ {
-		nonce[len(nonce)-8+i] ^= counter[i]
-	}
-	return aead.Open(nil, nonce, ciphertext, header)
+	return aead.Open(nil, xorNonce(iv, packetNum), ciphertext, header)
 }
 
 // quicCryptoFrames collects every CRYPTO frame in the packet. Chrome deliberately

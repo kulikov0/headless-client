@@ -24,9 +24,18 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/logging"
+	"github.com/pion/randutil"
 	"github.com/pion/rtcp"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/srtp/v3"
+)
+
+const (
+	rtcpCnameLength      = 16
+	rtcpCnameAlphabet    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	msidSemanticValue    = " WMS"
+	sessionOriginVersion = 2
+	sessionOriginAddress = "127.0.0.1"
 )
 
 // PeerConnection represents a WebRTC connection that establishes a
@@ -44,6 +53,8 @@ type PeerConnection struct {
 	ops *operations
 
 	configuration Configuration
+
+	rtcpCname string
 
 	currentLocalDescription  *SessionDescription
 	pendingLocalDescription  *SessionDescription
@@ -117,6 +128,11 @@ func (api *API) NewPeerConnection(configuration Configuration) (*PeerConnection,
 	// Some variables defined explicitly despite their implicit zero values to
 	// allow better readability to understand what is happening.
 
+	rtcpCname, err := randutil.GenerateCryptoRandomString(rtcpCnameLength, rtcpCnameAlphabet)
+	if err != nil {
+		return nil, err
+	}
+
 	pc := &PeerConnection{
 		id: fmt.Sprintf("PeerConnection-%d", time.Now().UnixNano()),
 		configuration: Configuration{
@@ -127,6 +143,7 @@ func (api *API) NewPeerConnection(configuration Configuration) (*PeerConnection,
 			Certificates:         []Certificate{},
 			ICECandidatePoolSize: 0,
 		},
+		rtcpCname:                               rtcpCname,
 		isClosed:                                &atomic.Bool{},
 		isCloseDone:                             make(chan struct{}),
 		isGracefulCloseDone:                     make(chan struct{}),
@@ -753,6 +770,7 @@ func (pc *PeerConnection) CreateOffer(options *OfferOptions) (SessionDescription
 				true, /*includeUnmatched */
 				connectionRoleFromDtlsRole(defaultDtlsRoleOffer),
 				false,
+				pc.offerSourceIdentity(),
 			)
 		}
 
@@ -935,6 +953,7 @@ func (pc *PeerConnection) CreateAnswer(options *AnswerOptions) (SessionDescripti
 		false, /*includeUnmatched */
 		connectionRole,
 		pc.api.settingEngine.ignoreRidPauseForRecv,
+		pc.answerSourceIdentity(),
 	)
 	if err != nil {
 		return SessionDescription{}, err
@@ -2304,7 +2323,7 @@ func (pc *PeerConnection) AddTransceiverFromKind(
 		if len(codecs) == 0 {
 			return nil, ErrNoCodecsAvailable
 		}
-		track, err := NewTrackLocalStaticSample(codecs[0].RTPCodecCapability, util.MathRandAlpha(16), util.MathRandAlpha(16))
+		track, err := NewTrackLocalStaticSample(codecs[0].RTPCodecCapability)
 		if err != nil {
 			return nil, err
 		}
@@ -2829,6 +2848,47 @@ func (pc *PeerConnection) startRTP(
 	}
 }
 
+type sourceIdentity struct {
+	cname                string
+	emitMediaSectionMsid bool
+	emitSsrcMsid         bool
+}
+
+func (pc *PeerConnection) offerSourceIdentity() sourceIdentity {
+	return sourceIdentity{
+		cname:                pc.rtcpCname,
+		emitMediaSectionMsid: true,
+		emitSsrcMsid:         true,
+	}
+}
+
+func (pc *PeerConnection) answerSourceIdentity() sourceIdentity {
+	remoteDescription := pc.pendingRemoteDescription
+	if remoteDescription == nil {
+		remoteDescription = pc.currentRemoteDescription
+	}
+
+	offeredMediaSectionMsid, offeredSsrcMsid := false, false
+	if remoteDescription != nil && remoteDescription.parsed != nil {
+		for _, media := range remoteDescription.parsed.MediaDescriptions {
+			for _, attribute := range media.Attributes {
+				switch {
+				case attribute.Key == sdp.AttrKeyMsid:
+					offeredMediaSectionMsid = true
+				case attribute.Key == sdp.AttrKeySSRC && strings.Contains(attribute.Value, " msid:"):
+					offeredSsrcMsid = true
+				}
+			}
+		}
+	}
+
+	if offeredSsrcMsid && !offeredMediaSectionMsid {
+		return sourceIdentity{cname: pc.rtcpCname, emitSsrcMsid: true}
+	}
+
+	return sourceIdentity{cname: pc.rtcpCname, emitMediaSectionMsid: true}
+}
+
 // generateUnmatchedSDP generates an SDP that doesn't take remote state into account.
 // This is used for the initial call for CreateOffer.
 //
@@ -2841,7 +2901,9 @@ func (pc *PeerConnection) generateUnmatchedSDP(
 	if err != nil {
 		return nil, err
 	}
-	desc.Attributes = append(desc.Attributes, sdp.Attribute{Key: sdp.AttrKeyMsidSemantic, Value: "WMS *"})
+	desc.Origin.SessionVersion = sessionOriginVersion
+	desc.Origin.UnicastAddress = sessionOriginAddress
+	desc.Attributes = append(desc.Attributes, sdp.Attribute{Key: sdp.AttrKeyMsidSemantic, Value: msidSemanticValue})
 
 	iceParams, err := pc.iceGatherer.GetLocalParameters()
 	if err != nil {
@@ -2928,6 +2990,7 @@ func (pc *PeerConnection) generateUnmatchedSDP(
 		nil,
 		pc.api.settingEngine.getSCTPMaxMessageSize(),
 		false,
+		pc.offerSourceIdentity(),
 	)
 }
 
@@ -2940,12 +3003,15 @@ func (pc *PeerConnection) generateMatchedSDP(
 	useIdentity, includeUnmatched bool,
 	connectionRole sdp.ConnectionRole,
 	ignoreRidPauseForRecv bool,
+	identity sourceIdentity,
 ) (*sdp.SessionDescription, error) {
 	desc, err := sdp.NewJSEPSessionDescription(useIdentity)
 	if err != nil {
 		return nil, err
 	}
-	desc.Attributes = append(desc.Attributes, sdp.Attribute{Key: sdp.AttrKeyMsidSemantic, Value: "WMS *"})
+	desc.Origin.SessionVersion = sessionOriginVersion
+	desc.Origin.UnicastAddress = sessionOriginAddress
+	desc.Attributes = append(desc.Attributes, sdp.Attribute{Key: sdp.AttrKeyMsidSemantic, Value: msidSemanticValue})
 
 	iceParams, err := pc.iceGatherer.GetLocalParameters()
 	if err != nil {
@@ -3113,6 +3179,7 @@ func (pc *PeerConnection) generateMatchedSDP(
 		bundleGroup,
 		pc.api.settingEngine.getSCTPMaxMessageSize(),
 		ignoreRidPauseForRecv,
+		identity,
 	)
 }
 

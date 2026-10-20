@@ -1,5 +1,5 @@
 diff --git a/conn.go b/conn.go
-index a241bf2..e0fd417 100644
+index 653a601..0b64efe 100644
 --- a/conn.go
 +++ b/conn.go
 @@ -48,6 +48,7 @@ const (
@@ -10,7 +10,7 @@ index a241bf2..e0fd417 100644
  	// maxAppDataPacketQueueSize is the maximum number of app data packets we will.
  	// enqueue before the handshake is completed.
  	maxAppDataPacketQueueSize = 100
-@@ -1154,7 +1155,12 @@ type preparedRecord struct {
+@@ -1176,7 +1177,12 @@ type preparedRecord struct {
  }
  
  func (c *Conn) prepareHandshakeRecords(outbound *dtlsflight.Outbound, dtlsHandshake *handshake.Handshake) ([]preparedRecord, error) {
@@ -24,7 +24,7 @@ index a241bf2..e0fd417 100644
  	if err != nil {
  		return nil, err
  	}
-@@ -1214,7 +1220,7 @@ func selectHandshakeFragment(offsets map[uint32]uint32, raw []byte) (bool, error
+@@ -1236,7 +1242,7 @@ func selectHandshakeFragment(offsets map[uint32]uint32, raw []byte) (bool, error
  	return ok && length == header.FragmentLength, nil
  }
  
@@ -33,7 +33,7 @@ index a241bf2..e0fd417 100644
  	content, err := dtlsHandshake.Message.Marshal()
  	if err != nil {
  		return nil, err
-@@ -1222,7 +1228,7 @@ func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte,
+@@ -1244,7 +1250,7 @@ func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte,
  
  	fragmentedHandshakes := make([][]byte, 0)
  
@@ -42,7 +42,7 @@ index a241bf2..e0fd417 100644
  	if len(contentFragments) == 0 {
  		contentFragments = [][]byte{
  			{},
-@@ -1255,6 +1261,43 @@ func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte,
+@@ -1277,6 +1283,43 @@ func (c *Conn) fragmentHandshake(dtlsHandshake *handshake.Handshake) ([][]byte,
  	return fragmentedHandshakes, nil
  }
  
@@ -55,7 +55,7 @@ index a241bf2..e0fd417 100644
 +	return available
 +}
 +
-+func (c *Conn) handshakeRecordOverhead(epoch uint16, protection dtlsflight.Protection) (int, error) {
++func (c *Conn) handshakeRecordOverhead(epoch uint64, protection dtlsflight.Protection) (int, error) {
 +	common := dtlsstate.CommonState(c.state)
 +	if protection != dtlsflight.ProtectionCiphertext || common.LocalVersion != protocol.Version1_3 {
 +		return recordlayer.FixedHeaderSize, nil
