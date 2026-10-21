@@ -64,6 +64,36 @@ func TestNonChromeParrotKeepsItsOwnSignatureAlgorithms(t *testing.T) {
 	}
 }
 
+// TestChromeCarriesTheUnregisteredExtensions pins the two unregistered
+// extensions Chrome sends next to the ECH GREASE pair: 0xCA34 (since
+// Chrome 152) and 0x12E0 (since Chrome 156). They are what makes the hello
+// carry 18 extensions instead of 16, and the fingerprint
+// t13d1518h2_8daaf6152771_4980c97edce0 instead of the Chrome 155 one
+// (t13d1517h2_8daaf6152771_cb7bf5808d99).
+func TestChromeCarriesTheUnregisteredExtensions(t *testing.T) {
+	spec, err := ChromeWindows.clientHelloSpec(nil, false)
+	if err != nil {
+		t.Fatalf("clientHelloSpec: %v", err)
+	}
+
+	found := map[uint16][]byte{}
+	for _, extension := range spec.Extensions {
+		generic, ok := extension.(*utls.GenericExtension)
+		if !ok {
+			continue
+		}
+		found[generic.Id] = generic.Data
+	}
+	for _, id := range []uint16{0xca34, 0x12e0} {
+		if _, ok := found[id]; !ok {
+			t.Fatalf("the chrome hello carries no %#04x extension", id)
+		}
+	}
+	if payload, ok := found[0x12e0]; !ok || len(payload) != 2 || payload[0] != 0x00 || payload[1] != 0x00 {
+		t.Fatalf("the 0x12e0 payload is %x, chrome sends two zero bytes", payload)
+	}
+}
+
 func TestSignatureAlgorithmsAreNotDuplicated(t *testing.T) {
 	spec, err := ChromeWindows.clientHelloSpec(nil, false)
 	if err != nil {

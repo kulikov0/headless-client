@@ -39,8 +39,36 @@ var (
 	boringSSLDefaultSignatureAlgorithms = []utls.SignatureScheme{
 		0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601, 0x0201,
 	}
-	chromeGoogleConnectionOptions = []byte("ORIG")
+	// chromeGoogleConnectionOptions is the token Chrome puts in the
+	// google_connection_options transport parameter (0x3128). Chrome 155
+	// sent "ORIG"; Chrome 156 sends "ORIGNOIP" (measured on the wire
+	// 2026-10-21, Chrome 156.0.8078.47, HTTP/3). The token is Chrome's own
+	// and changes with the release.
+	chromeGoogleConnectionOptions = []byte("ORIGNOIP")
 )
+
+// chromeQUICCA34Extension is the unregistered extension Chrome sends in its
+// QUIC hello, next to the ECH GREASE pair (measured on the wire 2026-10-21,
+// Chrome 156.0.8078.47, HTTP/3). The bytes are the ones Chrome puts in the
+// same extension of its TCP hello.
+//
+// Chrome 155 sent 11 extensions and fingerprinted as
+// q13i0311h3_55b375c5d22e_178839b6cec1; Chrome 156 sends 12 and
+// fingerprints as q13i0312h3_55b375c5d22e_eb028bd37c08. JA4 hashes extension
+// IDs, not payloads.
+var chromeQUICCA34Extension = utls.GenericExtension{
+	Id:   0xCA34,
+	Data: mustHex("00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"),
+}
+
+// chromeQUIC12E0Extension is the unregistered extension Chrome 156 sends in
+// its QUIC hello next to 0xCA34 (measured on the wire 2026-10-21 from a real
+// Chrome 156.0.8078.47, macOS). Its payload is two zero bytes in every
+// capture, in the QUIC hello as well as in the TCP one.
+var chromeQUIC12E0Extension = utls.GenericExtension{
+	Id:   0x12E0,
+	Data: []byte{0x00, 0x00},
+}
 
 func boringSSLDefaultSupportedGroups() []utls.CurveID {
 	groups := []utls.CurveID{utls.X25519, utls.CurveP256, utls.CurveP384}
@@ -92,6 +120,9 @@ func (p Profile) quicClientHelloSpec(transport QUICTransport, alpn []string) *ut
 	}
 	if transport == QUICHTTP3 {
 		extensions = append(extensions, utls.BoringGREASEECH())
+		// Chrome's QUIC hello carries the same two unregistered extensions
+		// its TCP hello does: 0xCA34 and, since Chrome 156, 0x12E0.
+		extensions = append(extensions, &chromeQUICCA34Extension, &chromeQUIC12E0Extension)
 	}
 
 	return &utls.ClientHelloSpec{

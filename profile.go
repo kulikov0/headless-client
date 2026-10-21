@@ -6,7 +6,12 @@ import (
 	utls "github.com/refraction-networking/utls"
 )
 
-const measuredChromeMajorVersion = 151
+// measuredChromeMajorVersion is the Chrome release this profile speaks: the
+// User-Agent, the client hints and the QUIC hello shape follow it. It is
+// bumped when a new stable Chrome changes the wire (Chrome 156: the 0x12E0
+// extension in the hello, the "ORIGNOIP" google_connection_options token and
+// the post-quantum key share).
+const measuredChromeMajorVersion = 156
 
 var measuredChromeVersion = strconv.Itoa(measuredChromeMajorVersion)
 

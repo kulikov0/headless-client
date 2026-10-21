@@ -122,6 +122,19 @@ var chromeCA34Extension = utls.GenericExtension{
 	Data: mustHex("00b808839a648c9b2d01080582df1302130582df13020608839a648c9b2d010908839a648c9b2d010704d679090b04d67909050582df1302120582df13020f08839a648c9b2d010c0582df13021404d679090708839a648c9b2d010a08839a648c9b2d010b0582df13020e0582df13020104d679090104d679090408839a648c9b2d010d04d679090808839a648c9b2d011204d679090f04d67909060582df13020d04d679090a04d679090d04d679090c08839a648c9b2d0113"),
 }
 
+// chrome12E0Extension is the unregistered extension Chrome 156 sends next
+// to 0xCA34 (captured on the wire 2026-10-21 from a real Chrome
+// 156.0.8078.47, macOS). Its payload is two zero bytes in every capture.
+//
+// Chrome 155 sent 17 extensions and fingerprinted as
+// t13d1517h2_8daaf6152771_cb7bf5808d99; Chrome 156 sends 18 and
+// fingerprints as t13d1518h2_8daaf6152771_4980c97edce0. JA4 hashes
+// extension IDs, not payloads.
+var chrome12E0Extension = utls.GenericExtension{
+	Id:   0x12E0,
+	Data: []byte{0x00, 0x00},
+}
+
 func mustHex(s string) []byte {
 	b, err := hex.DecodeString(s)
 	if err != nil {
@@ -145,6 +158,11 @@ func (p Profile) clientHelloSpec(alpnOverride []string, resumable bool) (*utls.C
 		// (t13d1517h2_8daaf6152771_cb7bf5808d99, measured on a live capture
 		// stand 2026-09-02). JA4 hashes extension IDs, not payloads.
 		spec.Extensions = append(spec.Extensions, &chromeCA34Extension)
+		// Chrome 156 adds 0x12E0 next to it: the fresh Chrome 156 hello
+		// carries 18 extensions and fingerprints as
+		// t13d1518h2_8daaf6152771_4980c97edce0, while Chrome 155 carried 17
+		// and fingerprinted as t13d1517h2_8daaf6152771_cb7bf5808d99.
+		spec.Extensions = append(spec.Extensions, &chrome12E0Extension)
 	}
 	if alpnOverride != nil {
 		filtered := spec.Extensions[:0]

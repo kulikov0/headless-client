@@ -9,6 +9,7 @@ import (
 
 var (
 	chromeWebTransportExtensions  = []uint16{0x0000, 0x000a, 0x000d, 0x0010, 0x001b, 0x002b, 0x002d, 0x0033, 0x0039, 0x44cd}
+	chromeHTTP3Extensions         = []uint16{0x0000, 0x000a, 0x000d, 0x0010, 0x001b, 0x002b, 0x002d, 0x0033, 0x0039, 0x12e0, 0x44cd, 0xca34, 0xfe0d}
 	chromeWebTransportGroups      = []utls.CurveID{0x001d, 0x0017, 0x0018}
 	chromeQUICSignatureAlgorithms = []utls.SignatureScheme{
 		0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601, 0x0201,
@@ -86,11 +87,23 @@ func TestHTTP3HelloAddsWhatTheSessionPoolConfigures(t *testing.T) {
 	webTransport := specExtensionIDs(t, ChromeWindows.quicClientHelloSpec(QUICWebTransport, []string{"h3"}))
 	http3 := specExtensionIDs(t, ChromeWindows.quicClientHelloSpec(QUICHTTP3, []string{"h3"}))
 
-	if len(http3) != len(webTransport)+1 {
-		t.Fatalf("http3 carries %d extensions and webtransport %d; the only documented difference is the ECH extension", len(http3), len(webTransport))
+	// The extension set Chrome 156 sends in its QUIC hello, measured on the
+	// wire 2026-10-21 from a real Chrome 156.0.8078.47: the WebTransport set
+	// plus the ECH GREASE and the two unregistered extensions 0xCA34 and
+	// 0x12E0. Chrome 155 carried one extension less and fingerprinted as
+	// q13i0311h3_55b375c5d22e_178839b6cec1; Chrome 156 carries twelve (or
+	// thirteen by name) and fingerprints as
+	// q13i0312h3_55b375c5d22e_eb028bd37c08.
+	if !slices.Equal(http3, chromeHTTP3Extensions) {
+		t.Fatalf("http3 extensions %#04x, the chrome capture carries %#04x", http3, chromeHTTP3Extensions)
 	}
-	if !slices.Contains(http3, 0xfe0d) {
-		t.Fatalf("http3 extensions %#04x carry no ECH, but QuicChromiumClientSession::GetSSLConfig sets ech_grease_enabled", http3)
+	for _, id := range []uint16{0xfe0d, 0xca34, 0x12e0} {
+		if !slices.Contains(http3, id) {
+			t.Fatalf("http3 extensions %#04x carry no %#04x", http3, id)
+		}
+	}
+	if len(webTransport) != len(http3)-3 {
+		t.Fatalf("http3 carries %d extensions and webtransport %d; the documented difference is the ECH extension and the two unregistered ones", len(http3), len(webTransport))
 	}
 
 	spec := ChromeWindows.quicClientHelloSpec(QUICHTTP3, []string{"h3"})
@@ -140,8 +153,15 @@ func TestQUICConfigCarriesTheChromeTransportParameters(t *testing.T) {
 	}
 
 	_, http3 := ChromeWindows.QUICConfig(QUICOptions{Transport: QUICHTTP3})
-	if _, ok := http3.AdditionalTransportParameters[0x3128]; !ok {
+	options, ok := http3.AdditionalTransportParameters[0x3128]
+	if !ok {
 		t.Fatal("http3 carries no google_connection_options, but the capture shows id 0x3128 on every h3 connection")
+	}
+	// The token Chrome 156 sends (measured on the wire 2026-10-21). Chrome
+	// 155 sent "ORIG"; the token is Chrome's own and changes with the
+	// release.
+	if string(options) != "ORIGNOIP" {
+		t.Fatalf("google_connection_options = %q, chrome 156 sends %q", options, "ORIGNOIP")
 	}
 }
 

@@ -18,7 +18,7 @@ with the Chrome equivalents.
 ## Status
 
 The library is in development. The API is unstable and changes without notice.
-One profile is available: Chrome 151 on Windows.
+One profile is available: Chrome 156 on Windows.
 
 ## Installation
 
@@ -164,7 +164,10 @@ post-quantum group, and BoringSSL's default signature algorithm list.
 
 `QUICHTTP3` matches the handshake Chrome sends for an HTTP/3 request. It adds
 the values that the HTTP/3 session pool sets: ECH GREASE, the X25519MLKEM768
-group, and the google_connection_options transport parameter.
+group, the google_connection_options transport parameter and the two
+unregistered extensions Chrome carries next to the ECH GREASE pair, `0xCA34`
+and `0x12E0`. The google_connection_options token is Chrome's own and changes
+with the release: Chrome 155 sent `ORIG`, Chrome 156 sends `ORIGNOIP`.
 
 The supported group list comes from the BoringSSL default for the Chrome
 version in `measuredChromeMajorVersion`. That default changed between the
@@ -272,11 +275,15 @@ derived from the blink-to-net priority chain, so they cover request destinations
 that were never captured.
 
 The TLS ClientHello starts from the utls Chrome 133 parrot, the newest Chrome
-parrot utls ships. Chrome 151 sends three signature algorithms that the parrot
-does not, `0x0904`, `0x0905` and `0x0906`, so the library prepends them. The
-rest of the ClientHello needs no patch. Against a Chrome 151 capture the
+parrot utls ships. Chrome sends three signature algorithms that the parrot
+does not, `0x0904`, `0x0905` and `0x0906`, so the library prepends them. It
+also sends two unregistered extensions next to the ECH GREASE pair, `0xCA34`
+(since Chrome 152) and `0x12E0` (since Chrome 156), which the library adds.
+The rest of the ClientHello needs no patch. Against a Chrome 156 capture the
 extension set, the groups and the cipher list match, and the JA4 fingerprints
-are equal.
+are equal (`t13d1518h2_8daaf6152771_4980c97edce0`; Chrome 155 carried one
+extension less and fingerprinted as
+`t13d1517h2_8daaf6152771_cb7bf5808d99`).
 
 libwebrtc calls `SSL_CTX_set_permute_extensions` on its SSL context. BoringSSL
 then permutes the extension table when it builds a ClientHello, and does not

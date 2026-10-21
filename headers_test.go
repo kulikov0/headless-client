@@ -68,7 +68,7 @@ func TestClientHintsRideEveryDestExceptTheWebSocketUpgrade(t *testing.T) {
 func TestClientHintValuesMatchTheProfilePlatform(t *testing.T) {
 	header := ChromeWindows.Headers(DestEmpty)
 
-	if got := header.Get("sec-ch-ua"); got != `"Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"` {
+	if got := header.Get("sec-ch-ua"); got != `"Not:A-Brand";v="8", "Chromium";v="156", "Google Chrome";v="156"` {
 		t.Fatalf("sec-ch-ua = %q", got)
 	}
 	if got := header.Get("sec-ch-ua-mobile"); got != "?0" {
