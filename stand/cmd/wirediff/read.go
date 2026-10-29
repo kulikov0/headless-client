@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/gopacket/gopacket"
@@ -16,6 +17,7 @@ import (
 const (
 	dtlsHandshakeContentType = 22
 	quicLongHeaderBit        = 0x80
+	loopbackSuffix           = ".loopback.pcap"
 )
 
 type observation struct {
@@ -148,6 +150,9 @@ func expandCaptures(argument string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	matches = slices.DeleteFunc(matches, func(path string) bool {
+		return strings.HasSuffix(path, loopbackSuffix)
+	})
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("no pcap files in %s", argument)
 	}
